@@ -133,6 +133,9 @@ class TailoringPack(BaseModel):
     honesty_note: str = ""
 
 
+ClaimClassification = Literal["near_miss", "unsupported"]
+
+
 class FlaggedClaim(BaseModel):
     """One statement the fabrication validator could not ground in the corpus."""
 
@@ -140,6 +143,7 @@ class FlaggedClaim(BaseModel):
     text: str
     reason: str
     best_match_ratio: float = 0.0
+    classification: ClaimClassification = "unsupported"
 
 
 class FabricationReport(BaseModel):
@@ -153,6 +157,9 @@ class FabricationReport(BaseModel):
     flags: int = 0
     claims_checked: int = 0
     flagged: list[FlaggedClaim] = Field(default_factory=list)
+    confirmed_claims: int = 0
+    near_miss_claims: int = 0
+    unsupported_claims: int = 0
     # The knob values this report ran with — recorded so every trace states
     # what produced the flags, making threshold tuning measurable in Opik.
     thresholds: dict[str, float] = Field(default_factory=dict)

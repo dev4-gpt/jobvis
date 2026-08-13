@@ -407,11 +407,16 @@ def _footer_html(result: RunResult) -> str:
         body = f"⚠ run failed — {escape(result.error_message)}. The trace has details · {link}"
     else:
         sources = escape(", ".join(result.jobs_sources) or "none")
+        diagnostics = " · ".join(
+            f"{d.source}: {d.latency_ms:.0f}ms/{d.returned}{' timeout' if d.timed_out else ''}" for d in result.source_diagnostics
+        )
         sep = ' <span class="js-muted">·</span> '
         body = (
             f'<span class="js-meta-mono">${result.cost_usd:.4f}</span>{sep}'
             f'<span class="js-meta-mono">{result.latency_s}s</span>{sep}'
-            f"source: {sources}{sep}{link}"
+            f"source: {sources}"
+            + (f'{sep}<span class="js-muted">{escape(diagnostics)}</span>' if diagnostics else "")
+            + f"{sep}{link}"
         )
     return f'<div class="js-footer">{body}</div>'
 
@@ -442,6 +447,13 @@ def _fabrication_html(result: TailorResult) -> str:
     if result.fabrication_flags == 0:
         return '<div class="js-fab-ok">✓ Every claim in this application traced back to your CV.</div>'
     report = result.fabrication_report
+    summary = ""
+    if report:
+        summary = (
+            f"<div class='js-muted' style='margin-top:6px'>"
+            f"{report.confirmed_claims} confirmed · {report.near_miss_claims} near-miss · "
+            f"{report.unsupported_claims} unsupported</div>"
+        )
     items = ""
     if report:
         items = "".join(
@@ -450,7 +462,7 @@ def _fabrication_html(result: TailorResult) -> str:
     n = result.fabrication_flags
     return (
         f'<div class="js-fab-warn"><b>⚠ {n} statement{"s" if n != 1 else ""} could not be verified against your CV.</b>'
-        f" Review before sending.<ul>{items}</ul></div>"
+        f" Review before sending.{summary}<ul>{items}</ul></div>"
     )
 
 

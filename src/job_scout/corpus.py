@@ -67,6 +67,7 @@ class CandidateCorpus(BaseModel):
     """All corpus items, addressable by id for grounding checks."""
 
     items: list[CorpusItem] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
     def get(self, item_id: str) -> CorpusItem | None:
         """Look up one item by its id, or ``None``."""
@@ -86,7 +87,14 @@ def build_corpus(cv_text: str, linkedin_zip: str | Path | None = None) -> Candid
     items = _segment_cv(cv_text)
     if linkedin_zip:
         items.extend(_parse_linkedin_zip(Path(linkedin_zip)))
-    return CandidateCorpus(items=items)
+    warnings: list[str] = []
+    if len(cv_text.split()) < 40:
+        warnings.append("CV text is unusually short; grounding may be incomplete")
+    if not any(item.kind == "bullet" for item in items if item.source == "cv"):
+        warnings.append("No experience bullets were detected in the CV")
+    if not any(item.kind == "skill" for item in items if item.source == "cv"):
+        warnings.append("No dedicated skills section was detected; skill checks use full CV text")
+    return CandidateCorpus(items=items, warnings=warnings)
 
 
 def _looks_like_heading(line: str) -> bool:

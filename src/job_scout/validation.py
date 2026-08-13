@@ -57,6 +57,12 @@ _NUM_SUFFIXES = {"k": "thousand", "m": "million", "bn": "billion", "b": "billion
 _NUM_SUFFIX_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s*(bn|k|m|b)\b")
 _PER_RE = re.compile(r"\bper\s+(\w+)\b")
 _FREQ_WORDS = {"daily": "day", "weekly": "week", "monthly": "month", "yearly": "year", "annually": "year", "hourly": "hour"}
+_NEAR_MISS_MARGIN = 0.10
+
+
+def _claim_classification(ratio: float, threshold: float) -> str:
+    """Classify a failed match for human review without changing the gate."""
+    return "near_miss" if ratio >= max(0.0, threshold - _NEAR_MISS_MARGIN) else "unsupported"
 
 
 def _normalize(text: str) -> str:
@@ -136,6 +142,9 @@ def validate_pack(
     letter_ratio = settings.fab_letter_ratio
     flagged: list[FlaggedClaim] = []
     claims_checked = 0
+    confirmed_claims = 0
+    near_miss_claims = 0
+    unsupported_claims = 0
 
     # 1. CV bullets: the corpus_ref must resolve and the rewrite must stay close.
     for entry in pack.cv.experience:
@@ -143,24 +152,34 @@ def validate_pack(
             claims_checked += 1
             item = corpus.get(bullet.corpus_ref)
             if item is None:
+                unsupported_claims += 1
                 flagged.append(
                     FlaggedClaim(
                         where=f"cv_bullet:{bullet.corpus_ref}",
                         text=bullet.text,
                         reason="corpus_ref does not resolve to any corpus item",
+                        classification="unsupported",
                     )
                 )
                 continue
             ratio = _ratio(bullet.text, item.text)
             if ratio < bullet_ratio:
+                classification = _claim_classification(ratio, bullet_ratio)
+                if classification == "near_miss":
+                    near_miss_claims += 1
+                else:
+                    unsupported_claims += 1
                 flagged.append(
                     FlaggedClaim(
                         where=f"cv_bullet:{bullet.corpus_ref}",
                         text=bullet.text,
                         reason=f"rewrite drifted too far from its corpus item (ratio {ratio:.2f} < {bullet_ratio})",
                         best_match_ratio=round(ratio, 3),
+                        classification=classification,
                     )
                 )
+            else:
+                confirmed_claims += 1
 
     # 2. Skills: must come from the corpus skill vocabulary. When segmentation
     #    parsed no skills section at all, fall back to grounding each skill's
@@ -178,19 +197,32 @@ def validate_pack(
             claimed = set(_normalize(skill).split())
             contained = bool(claimed) and any(claimed <= set(_normalize(cs).split()) for cs in corpus_skills)
             if best < skill_ratio and not contained:
+                classification = _claim_classification(best, skill_ratio)
+                if classification == "near_miss":
+                    near_miss_claims += 1
+                else:
+                    unsupported_claims += 1
                 flagged.append(
                     FlaggedClaim(
                         where=f"skill:{skill}",
                         text=skill,
                         reason=f"skill is not in the candidate's corpus (best match {best:.2f})",
                         best_match_ratio=round(best, 3),
+                        classification=classification,
                     )
                 )
+            else:
+                confirmed_claims += 1
         else:
             tokens = [t for t in _normalize(skill).split() if len(t) >= _MIN_SKILL_TOKEN_CHARS]
             missing = [t for t in tokens if t not in full_corpus_text]
             if missing:
                 found = 1 - len(missing) / len(tokens) if tokens else 0.0
+                classification = _claim_classification(found, skill_ratio)
+                if classification == "near_miss":
+                    near_miss_claims += 1
+                else:
+                    unsupported_claims += 1
                 flagged.append(
                     FlaggedClaim(
                         where=f"skill:{skill}",
@@ -200,8 +232,11 @@ def validate_pack(
                             f"nowhere in its text: {', '.join(missing)}"
                         ),
                         best_match_ratio=round(found, 3),
+                        classification=classification,
                     )
                 )
+            else:
+                confirmed_claims += 1
 
     # 3. Cover letter: factual sentences must trace to the corpus, the research
     #    notes, or the job context.
@@ -219,18 +254,29 @@ def validate_pack(
         if best < letter_ratio:
             best = max(best, _best_pair_ratio(sentence, references))
         if best < letter_ratio:
+            classification = _claim_classification(best, letter_ratio)
+            if classification == "near_miss":
+                near_miss_claims += 1
+            else:
+                unsupported_claims += 1
             flagged.append(
                 FlaggedClaim(
                     where=f"cover_letter:sentence:{n}",
                     text=sentence,
                     reason=f"factual claim not traceable to the corpus or research (best match {best:.2f})",
                     best_match_ratio=round(best, 3),
+                    classification=classification,
                 )
             )
+        else:
+            confirmed_claims += 1
 
     return FabricationReport(
         flags=len(flagged),
         claims_checked=claims_checked,
         flagged=flagged,
+        confirmed_claims=confirmed_claims,
+        near_miss_claims=near_miss_claims,
+        unsupported_claims=unsupported_claims,
         thresholds={"bullet": bullet_ratio, "skill": skill_ratio, "letter": letter_ratio},
     )

@@ -62,6 +62,7 @@ def tailor(state: AgentState) -> dict:
     except ValueError as exc:  # bad LinkedIn upload — degrade to CV-only
         errors.append(f"tailor: {exc}; continuing with the CV only")
         corpus = build_corpus(state.get("cv_text", ""))
+    errors.extend(f"tailor: {warning}" for warning in corpus.warnings)
     if not corpus.items:
         errors.append("tailor: empty candidate corpus (no cv_text on this thread) — cannot ground an application")
         return {"tailoring": None, "errors": errors}
