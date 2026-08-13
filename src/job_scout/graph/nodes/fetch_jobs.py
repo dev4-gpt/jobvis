@@ -13,7 +13,7 @@ from job_scout.config import get_settings
 from job_scout.graph.schemas import JobPosting
 from job_scout.graph.state import AgentState
 from job_scout.llm import ensure_budget, get_chat_model
-from job_scout.tools.jobs_api import run_search, search_jobs
+from job_scout.tools.jobs_api import run_search_detailed as run_search, search_jobs
 
 # Per-fetch limit comes from settings (SCOUT_MAX_JOBS, default 10 — it drives
 # ranking latency directly: 10 jobs = 2 LLM batches ≈ half a minute end to end).
@@ -76,13 +76,21 @@ def fetch_jobs(state: AgentState) -> dict:
         country = None
         remote = profile.remote_ok
 
-    jobs, sources = run_search(query=query, location=location, country=country, remote=remote, limit=settings.scout_max_jobs)
+    search = run_search(query=query, location=location, country=country, remote=remote, limit=settings.scout_max_jobs)
+    if isinstance(search, tuple):  # compatibility with simple test doubles and older callers
+        jobs, sources = search
+        diagnostics = []
+    else:
+        jobs = search.jobs
+        sources = search.sources_used
+        diagnostics = search.diagnostics
     jobs = _dedupe_with_existing(state.get("jobs", []), jobs)[:MERGED_CEILING]
 
     return {
         "jobs": jobs,
         "search_query": query,
         "jobs_sources": sources,
+        "source_diagnostics": diagnostics,
         "errors": errors,
         "llm_calls": calls,
     }

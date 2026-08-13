@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from job_scout.graph.schemas import FabricationReport, JobPosting, Profile, RankedJob, TailoringPack
+from job_scout.graph.schemas import FabricationReport, JobPosting, Profile, RankedJob, SourceDiagnostic, TailoringPack
 
 
 class AgentState(TypedDict, total=False):
@@ -31,6 +31,7 @@ class AgentState(TypedDict, total=False):
     llm_calls: int
     errors: list[str]
     jobs_sources: list[str]
+    source_diagnostics: list[SourceDiagnostic]
     tailoring: TailoringPack | None
     selected_job_id: str | None
     linkedin_zip_path: str | None

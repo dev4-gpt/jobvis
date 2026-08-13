@@ -15,7 +15,7 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 
 from job_scout.config import get_settings
 from job_scout.graph import get_compiled_graph
-from job_scout.graph.schemas import FabricationReport, Profile, RankedJob, TailoringPack
+from job_scout.graph.schemas import FabricationReport, Profile, RankedJob, SourceDiagnostic, TailoringPack
 from job_scout.profile import extract_profile
 from job_scout.tracing import attach_cv, get_tracer, opik_url, trace_graph
 
@@ -41,6 +41,7 @@ class RunResult:
     profile: Profile | None = None
     ranked_jobs: list[RankedJob] = field(default_factory=list)
     jobs_sources: list[str] = field(default_factory=list)
+    source_diagnostics: list[SourceDiagnostic] = field(default_factory=list)
     reformulation_count: int = 0
     n_jobs_fetched: int = 0
     n_jobs_ranked: int = 0
@@ -99,6 +100,7 @@ def stream_search(
         result.profile = final.get("profile")
         result.ranked_jobs = final.get("ranked_jobs", [])
         result.jobs_sources = final.get("jobs_sources", [])
+        result.source_diagnostics = final.get("source_diagnostics", [])
         result.reformulation_count = final.get("reformulation_count", 0)
         result.n_jobs_fetched = len(final.get("jobs", []))
         result.n_jobs_ranked = len(result.ranked_jobs)

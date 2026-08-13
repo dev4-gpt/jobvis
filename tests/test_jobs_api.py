@@ -12,6 +12,7 @@ from job_scout.tools.jobs_api import (
     JSearchSource,
     location_to_country,
     run_search,
+    run_search_detailed,
 )
 from tests.conftest import make_job
 
@@ -180,6 +181,22 @@ def test_cache_source_keyword_match(tmp_path):
     jobs = src.fetch("machine learning python", None, None, False, 10)
     assert jobs[0].title == "Machine Learning Engineer"
     assert jobs[0].source == "cache"
+
+
+def test_detailed_search_reports_latency_counts_and_contribution():
+    adzuna = _fake_source("adzuna", [make_job("a1", "A", "Acme", "adzuna")])
+    remotive = _fake_source("remotive", [make_job("r1", "R", "RemoteCo", "remotive", True)])
+    cache = _fake_source("cache", [make_job("c1", "C", "CacheCo", "cache")])
+
+    result = run_search_detailed("data scientist", adzuna=adzuna, remotive=remotive, cache=cache)
+
+    by_source = {item.source: item for item in result.diagnostics}
+    assert result.sources_used == ["adzuna", "remotive", "cache"]
+    assert by_source["adzuna"].completed is True
+    assert by_source["adzuna"].returned == 1
+    assert by_source["adzuna"].contributed is True
+    assert by_source["adzuna"].latency_ms >= 0
+    assert by_source["cache"].contributed is True
 
 
 def test_concurrent_fanout_preserves_cascade_priority(monkeypatch):

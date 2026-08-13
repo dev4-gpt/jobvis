@@ -20,8 +20,10 @@ from __future__ import annotations
 import contextvars
 import json
 import re
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -29,12 +31,21 @@ import httpx
 from langchain_core.tools import tool
 
 from job_scout.config import get_settings
-from job_scout.graph.schemas import JobPosting
+from job_scout.graph.schemas import JobPosting, SourceDiagnostic
 
 DESCRIPTION_LIMIT = 4000
 DEFAULT_LIMIT = 25
 DEFAULT_COUNTRY = "us"
 CACHE_PATH = Path(__file__).resolve().parent.parent.parent.parent / "data" / "cached_jobs.json"
+
+
+@dataclass
+class SearchResult:
+    """Detailed search output while preserving the legacy tuple API."""
+
+    jobs: list[JobPosting] = field(default_factory=list)
+    sources_used: list[str] = field(default_factory=list)
+    diagnostics: list[SourceDiagnostic] = field(default_factory=list)
 
 _COUNTRY_CODES: dict[str, str] = {
     "united states": "us", "usa": "us", "us": "us", "america": "us",
@@ -284,7 +295,7 @@ def _dedupe(jobs: list[JobPosting]) -> list[JobPosting]:
     return out
 
 
-def run_search(
+def run_search_detailed(
     query: str,
     location: str | None = None,
     country: str | None = None,
@@ -309,6 +320,8 @@ def run_search(
 
     jobs: list[JobPosting] = []
     used: list[str] = []
+    diagnostics: dict[str, SourceDiagnostic] = {}
+    started: dict[str, float] = {}
 
     # One span per source, so the trace answers "which source was slow" instead
     # of only "the search took 3 seconds" — the difference between diagnosing
@@ -321,11 +334,23 @@ def run_search(
     def _spanned(name: str, fn: Callable[[], list[JobPosting]]) -> Callable[[], list[JobPosting]]:
         return traced_call(f"source.{name}", fn, metadata={"source": name, "query": query, "location": location or ""})
 
+    def _tracked(name: str, fn: Callable[[], list[JobPosting]]) -> Callable[[], list[JobPosting]]:
+        diagnostics[name] = SourceDiagnostic(source=name)
+        started[name] = time.perf_counter()
+        return _spanned(name, fn)
+
     fetchers: dict[str, Callable[[], list[JobPosting]]] = {}
     if jsearch.available:
-        fetchers["jsearch"] = _spanned("jsearch", lambda: jsearch.fetch(query, location, country, remote, limit))
-    fetchers["adzuna"] = _spanned("adzuna", lambda: adzuna.fetch(query, location, country, remote, limit))
-    fetchers["remotive"] = _spanned("remotive", lambda: remotive.fetch(query, location, country, remote, limit))
+        fetchers["jsearch"] = _tracked("jsearch", lambda: jsearch.fetch(query, location, country, remote, limit))
+    fetchers["adzuna"] = _tracked("adzuna", lambda: adzuna.fetch(query, location, country, remote, limit))
+    fetchers["remotive"] = _tracked("remotive", lambda: remotive.fetch(query, location, country, remote, limit))
+
+    def _complete(name: str, found: list[JobPosting], error: str | None = None) -> None:
+        diagnostic = diagnostics.setdefault(name, SourceDiagnostic(source=name))
+        diagnostic.completed = True
+        diagnostic.returned = len(found)
+        diagnostic.latency_ms = round((time.perf_counter() - started.get(name, time.perf_counter())) * 1000, 2)
+        diagnostic.error = error
 
     concurrent = get_settings().scout_concurrent_sources and len(fetchers) > 1
     pool: ThreadPoolExecutor | None = None
@@ -343,18 +368,25 @@ def run_search(
             if fut is None:
                 return []
             try:
-                return fut.result(timeout=timeout)
+                found = fut.result(timeout=timeout)
             except TimeoutError:
+                diagnostics[name].timed_out = True
                 return []
-            except Exception:  # noqa: BLE001 - a dead source is an empty source
+            except Exception as exc:  # noqa: BLE001 - a dead source is an empty source
+                _complete(name, [], f"{type(exc).__name__}: {exc}")
                 return []
+            _complete(name, found)
+            return found
     else:
 
         def fetch(name: str, timeout: float | None = None) -> list[JobPosting]:
             try:
-                return fetchers[name]() if name in fetchers else []
-            except Exception:  # noqa: BLE001 - a dead source is an empty source
+                found = fetchers[name]() if name in fetchers else []
+            except Exception as exc:  # noqa: BLE001 - a dead source is an empty source
+                _complete(name, [], f"{type(exc).__name__}: {exc}")
                 return []
+            _complete(name, found)
+            return found
 
     def add(source_name: str, found: list[JobPosting]) -> None:
         """Record a source's results if it returned any."""
@@ -377,12 +409,37 @@ def run_search(
             add("jsearch", fetch("jsearch"))
 
         if len(_dedupe(jobs)) < 3:
-            add("cache", cache.fetch(query, location, country, remote, limit))
+            diagnostics["cache"] = SourceDiagnostic(source="cache")
+            started["cache"] = time.perf_counter()
+            try:
+                cache_jobs = cache.fetch(query, location, country, remote, limit)
+            except Exception as exc:  # noqa: BLE001 - cache is also a fail-forward adapter
+                _complete("cache", [], f"{type(exc).__name__}: {exc}")
+                cache_jobs = []
+            else:
+                _complete("cache", cache_jobs)
+            add("cache", cache_jobs)
     finally:
         if pool is not None:
             pool.shutdown(wait=False)
 
-    return _dedupe(jobs)[:limit], used
+    final_jobs = _dedupe(jobs)[:limit]
+    for diagnostic in diagnostics.values():
+        diagnostic.contributed = any(job.source == diagnostic.source for job in final_jobs)
+    return SearchResult(jobs=final_jobs, sources_used=used, diagnostics=list(diagnostics.values()))
+
+
+def run_search(
+    query: str,
+    location: str | None = None,
+    country: str | None = None,
+    remote: bool = False,
+    limit: int = DEFAULT_LIMIT,
+    **sources: object,
+) -> tuple[list[JobPosting], list[str]]:
+    """Legacy-compatible search API returning jobs and consumed source names."""
+    result = run_search_detailed(query, location, country, remote, limit, **sources)  # type: ignore[arg-type]
+    return result.jobs, result.sources_used
 
 
 @tool

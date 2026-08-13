@@ -66,6 +66,7 @@ _CHECKPOINT_TYPES = [
         "TailoringPack",
         "FlaggedClaim",
         "FabricationReport",
+        "SourceDiagnostic",
     )
 ]
 

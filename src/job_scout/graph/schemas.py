@@ -49,6 +49,19 @@ class JobPosting(BaseModel):
     source: JobSourceName
 
 
+class SourceDiagnostic(BaseModel):
+    """Observable outcome of one attempted job source."""
+
+    source: str
+    requested: bool = True
+    completed: bool = False
+    timed_out: bool = False
+    latency_ms: float = 0.0
+    returned: int = 0
+    contributed: bool = False
+    error: str | None = None
+
+
 class JobScore(BaseModel):
     """The ranking LLM's score for one job, keyed back to a posting by id."""
 
