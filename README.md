@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/LangGraph-1.1+-ff6f00.svg" alt="LangGraph">
   <img src="https://img.shields.io/badge/Opik-observability-6f42c1.svg" alt="Opik">
   <img src="https://img.shields.io/badge/Gradio-5+-f97316.svg" alt="Gradio">
-  <img src="https://img.shields.io/badge/tests-129%20passing-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-140%20passing-brightgreen.svg" alt="Tests">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
 
@@ -44,7 +44,7 @@ git clone --branch part3.0 https://github.com/jamwithai/observable-job-agent
 cd observable-job-agent
 uv sync --all-groups
 cp .env.example .env    # add one LLM key (see below)
-make test               # 129 tests, no keys or network needed
+make test               # 141 tests, no keys or network needed
 make app                # http://localhost:7860
 ```
 
@@ -117,8 +117,8 @@ observable-job-agent/
 ├── notebooks/              # phase1_walkthrough.ipynb, phase2_evaluation.ipynb
 ├── scripts/                # batches, dataset builders, eval suites, annotation queue
 ├── data/                   # cached_jobs.json, fixture_cvs/, fixture_linkedin/, labels/
-├── docs/                   # architecture, opik_setup, findings, baseline + batch reports
-└── tests/                  # 129 tests (LLM mocked, network mocked, Opik off)
+├── docs/                   # architecture, learning guides, privacy, findings, reports
+└── tests/                  # 141 tests (LLM mocked, network mocked, Opik off)
 ```
 
 ## 🔧 Commands
@@ -134,6 +134,8 @@ make gates         # deterministic regression gate (no LLM calls)
 make search-bench  # paired before/after source timing
 make queue         # create the Opik annotation queue
 make lint          # ruff
+make health        # import/config health check without starting the UI
+make ci             # local equivalent of the keyless CI checks
 ```
 
 ## 🛠️ Troubleshooting
@@ -141,6 +143,10 @@ make lint          # ruff
 - **All jobs say `source: cache`**: no live-source keys or no network. Expected; the cache is the offline fallback.
 - **"Couldn't read a profile ... api_key"**: add an LLM key to `.env`, or set `SCOUT_MODEL` to a free `groq:`/`ollama:` model.
 - **No traces in Opik**: check `OPIK_ENABLED=true`, `OPIK_API_KEY`, `OPIK_WORKSPACE`. See [`docs/opik_setup.md`](docs/opik_setup.md).
+
+Data and tracing policy: [`docs/privacy.md`](docs/privacy.md). Full Opik tracing
+is enabled by default for this learning project; uploaded CVs may be attached to
+traces when an Opik key is configured.
 
 **Cost:** reproducing everything in Parts 1 and 2 is a few dollars end to end with API models (the 15-case tailoring batch cost $0.37), or free with local models and free tiers.
 

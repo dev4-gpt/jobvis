@@ -66,8 +66,7 @@ def main() -> None:
             sources = sorted({r[2] for r in runs})
             spread = max(ms) - min(ms)
             print(
-                f"  {label:16} median {statistics.median(ms):8.0f} ms   "
-                f"spread {spread:7.0f} ms   jobs {jobs}   sources {sources}"
+                f"  {label:16} median {statistics.median(ms):8.0f} ms   spread {spread:7.0f} ms   jobs {jobs}   sources {sources}"
             )
         print()
 

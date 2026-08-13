@@ -54,6 +54,18 @@ test: ## Run the test suite
 lint: ## Lint with ruff
 	uv run ruff check .
 
+.PHONY: health
+health: ## Run the keyless import/config health check
+	uv run python -m job_scout.health
+
+.PHONY: ci
+ci: ## Run the keyless checks used by pull-request CI
+	uv run ruff format --check .
+	uv run ruff check .
+	uv run pyright
+	uv run pytest
+	uv run pytest gates/ -v
+
 .PHONY: format
 format: ## Format with ruff
 	uv run ruff format .

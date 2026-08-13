@@ -45,7 +45,6 @@ class Settings(BaseSettings):
 
     tavily_api_key: SecretStr = Field(default=SecretStr(""), alias="TAVILY_API_KEY")
 
-
     max_llm_calls_per_run: int = Field(default=25, alias="MAX_LLM_CALLS_PER_RUN")
     scout_max_jobs: int = Field(default=10, alias="SCOUT_MAX_JOBS")
     scout_max_reformulations: int = Field(default=2, alias="SCOUT_MAX_REFORMULATIONS")
@@ -107,7 +106,6 @@ class Settings(BaseSettings):
     def has_opik(self) -> bool:
         """Whether Opik tracing is enabled and has an API key."""
         return self.opik_enabled and bool(self.opik_api_key.get_secret_value())
-
 
 
 @lru_cache(maxsize=1)

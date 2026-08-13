@@ -3,5 +3,11 @@
   "venv": ".venv",
   "extraPaths": ["src"],
   "pythonVersion": "3.12",
-  "reportMissingModuleSource": "none"
+  "reportMissingModuleSource": "none",
+  "include": [
+    "src/job_scout/health.py",
+    "src/job_scout/graph/schemas.py",
+    "src/job_scout/graph/state.py"
+  ],
+  "typeCheckingMode": "basic"
 }

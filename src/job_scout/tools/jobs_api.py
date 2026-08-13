@@ -47,6 +47,7 @@ class SearchResult:
     sources_used: list[str] = field(default_factory=list)
     diagnostics: list[SourceDiagnostic] = field(default_factory=list)
 
+
 _COUNTRY_CODES: dict[str, str] = {
     "united states": "us", "usa": "us", "us": "us", "america": "us",
     "united kingdom": "gb", "uk": "gb", "england": "gb", "london": "gb",
@@ -306,7 +307,7 @@ def run_search_detailed(
     adzuna: AdzunaSource | None = None,
     remotive: RemotiveSource | None = None,
     cache: CacheSource | None = None,
-) -> tuple[list[JobPosting], list[str]]:
+) -> SearchResult:
     """Search across the sources in order and return ``(jobs, sources_used)``.
 
     A source is only queried if the previous ones returned too few jobs. Results
@@ -435,10 +436,24 @@ def run_search(
     country: str | None = None,
     remote: bool = False,
     limit: int = DEFAULT_LIMIT,
-    **sources: object,
+    *,
+    jsearch: JSearchSource | None = None,
+    adzuna: AdzunaSource | None = None,
+    remotive: RemotiveSource | None = None,
+    cache: CacheSource | None = None,
 ) -> tuple[list[JobPosting], list[str]]:
     """Legacy-compatible search API returning jobs and consumed source names."""
-    result = run_search_detailed(query, location, country, remote, limit, **sources)  # type: ignore[arg-type]
+    result = run_search_detailed(
+        query,
+        location,
+        country,
+        remote,
+        limit,
+        jsearch=jsearch,
+        adzuna=adzuna,
+        remotive=remotive,
+        cache=cache,
+    )
     return result.jobs, result.sources_used
 
 

@@ -1,0 +1,13 @@
+.git
+.venv
+.pytest_cache
+.ruff_cache
+.env
+.env.*
+tests
+gates
+notebooks
+docs
+data/fixture_cvs
+data/fixture_linkedin
+*.ipynb
