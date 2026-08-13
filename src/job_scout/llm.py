@@ -22,24 +22,35 @@ class LLMBudgetExceededError(RuntimeError):
     """Raised when a run would exceed ``MAX_LLM_CALLS_PER_RUN``."""
 
 
-def _export_openai_key() -> None:
-    """Copy the OpenAI key from settings into the environment for LangChain.
+def _export_provider_env(model: str) -> None:
+    """Copy provider settings from ``.env`` into environment variables.
 
     ``pydantic-settings`` reads ``.env`` into the ``Settings`` object but does not
-    export to ``os.environ``, which is where the OpenAI client looks for its key.
+    export to ``os.environ``, which is where LangChain provider clients look for
+    credentials and endpoints.
     """
-    if os.environ.get("OPENAI_API_KEY"):
-        return
-    key = get_settings().openai_api_key.get_secret_value()
-    if key:
-        os.environ["OPENAI_API_KEY"] = key
+    settings = get_settings()
+    if model.startswith("openai:"):
+        if not os.environ.get("OPENAI_API_KEY"):
+            key = settings.openai_api_key.get_secret_value()
+            if key:
+                os.environ["OPENAI_API_KEY"] = key
+        if not os.environ.get("OPENAI_BASE_URL") and settings.openai_base_url:
+            os.environ["OPENAI_BASE_URL"] = settings.openai_base_url
+    elif model.startswith("groq:"):
+        if not os.environ.get("GROQ_API_KEY"):
+            key = settings.groq_api_key.get_secret_value()
+            if key:
+                os.environ["GROQ_API_KEY"] = key
+    elif model.startswith("ollama:"):
+        if not os.environ.get("OLLAMA_HOST") and settings.ollama_base_url:
+            os.environ["OLLAMA_HOST"] = settings.ollama_base_url
 
 
 @lru_cache(maxsize=8)
 def get_chat_model(model: str, temperature: float = 0.0) -> BaseChatModel:
     """Return a cached chat model for a LangChain provider string (e.g. ``openai:gpt-4o-mini``)."""
-    if model.startswith("openai:"):
-        _export_openai_key()
+    _export_provider_env(model)
     return init_chat_model(model, temperature=temperature)
 
 

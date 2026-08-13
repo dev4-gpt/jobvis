@@ -41,6 +41,7 @@ optimize = [
 # Documented alternative provider (see .env.example). Install with:
 #   uv sync --extra groq
 groq = ["langchain-groq>=0.2"]
+ollama = ["langchain-ollama>=0.2"]
 
 [build-system]
 requires = ["hatchling"]

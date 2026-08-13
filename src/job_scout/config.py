@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     scout_tailor_model: str = Field(default="openai:gpt-4o-mini", alias="SCOUT_TAILOR_MODEL")
 
     openai_api_key: SecretStr = Field(default=SecretStr(""), alias="OPENAI_API_KEY")
+    # OpenRouter exposes an OpenAI-compatible endpoint. This is deliberately
+    # separate from the key so switching providers never changes secret names.
+    openai_base_url: str = Field(default="", alias="OPENAI_BASE_URL")
+    groq_api_key: SecretStr = Field(default=SecretStr(""), alias="GROQ_API_KEY")
+    ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_BASE_URL")
 
     opik_api_key: SecretStr = Field(default=SecretStr(""), alias="OPIK_API_KEY")
     opik_workspace: str = Field(default="", alias="OPIK_WORKSPACE")
@@ -72,6 +77,8 @@ class Settings(BaseSettings):
         "scout_model",
         "scout_tailor_model",
         "scout_fetch_model",
+        "openai_base_url",
+        "ollama_base_url",
         mode="before",
     )
     @classmethod

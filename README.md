@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/LangGraph-1.1+-ff6f00.svg" alt="LangGraph">
   <img src="https://img.shields.io/badge/Opik-observability-6f42c1.svg" alt="Opik">
   <img src="https://img.shields.io/badge/Gradio-5+-f97316.svg" alt="Gradio">
-  <img src="https://img.shields.io/badge/tests-140%20passing-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-145%20passing-brightgreen.svg" alt="Tests">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
 
@@ -44,13 +44,15 @@ git clone --branch part3.0 https://github.com/jamwithai/observable-job-agent
 cd observable-job-agent
 uv sync --all-groups --no-editable
 cp .env.example .env    # add one LLM key (see below)
-make test               # 142 passing, 1 expected renderer skip
+make test               # 145 passing, 1 expected renderer skip
 make app                # http://localhost:7860
 ```
 
 **Keys, honestly:**
 - Tests, job sources (Remotive + offline cache), and the fabrication validator run with **no keys at all**.
 - The agent steps (profile extraction, ranking, tailoring) need **one LLM key**: `OPENAI_API_KEY`, or free via `SCOUT_MODEL=groq:...` (free tier) or `ollama:...` (local).
+- OpenRouter works through the OpenAI-compatible adapter: set `OPENAI_BASE_URL=https://openrouter.ai/api/v1` and prefix model IDs as `openai:provider/model`.
+- Groq and Ollama are selectable providers, not automatic failover: install the matching extra and choose the provider in `SCOUT_MODEL`.
 - Opik tracing has its own free key: [`docs/opik_setup.md`](docs/opik_setup.md).
 
 The app remembers your CV and chosen locations between runs ("Start over" forgets). Jobs are always fetched fresh.
@@ -118,7 +120,7 @@ observable-job-agent/
 ├── scripts/                # batches, dataset builders, eval suites, annotation queue
 ├── data/                   # cached_jobs.json, fixture_cvs/, fixture_linkedin/, labels/
 ├── docs/                   # architecture, learning guides, privacy, findings, reports
-└── tests/                  # 142 passing, 1 expected renderer skip
+└── tests/                  # 145 passing, 1 expected renderer skip
 ```
 
 ## 🔧 Commands
