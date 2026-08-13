@@ -37,3 +37,17 @@ def test_ollama_settings_export(monkeypatch):
     _export_provider_env("ollama:qwen3.5:4b")
 
     assert os.environ["OLLAMA_HOST"]
+
+
+def test_nvidia_nim_model_uses_its_own_openai_compatible_endpoint(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-nvidia-key")
+    monkeypatch.setenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+    get_settings.cache_clear()
+
+    from job_scout.llm import get_chat_model
+
+    model = get_chat_model("nvidia:openai/gpt-oss-20b")
+
+    assert type(model).__name__ == "ChatOpenAI"
+    assert model.model_name == "openai/gpt-oss-20b"
+    assert str(model.openai_api_base).rstrip("/") == "https://integrate.api.nvidia.com/v1"

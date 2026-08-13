@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     # separate from the key so switching providers never changes secret names.
     openai_base_url: str = Field(default="", alias="OPENAI_BASE_URL")
     groq_api_key: SecretStr = Field(default=SecretStr(""), alias="GROQ_API_KEY")
+    nvidia_api_key: SecretStr = Field(default=SecretStr(""), alias="NVIDIA_API_KEY")
+    nvidia_base_url: str = Field(default="https://integrate.api.nvidia.com/v1", alias="NVIDIA_BASE_URL")
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_BASE_URL")
 
     opik_api_key: SecretStr = Field(default=SecretStr(""), alias="OPIK_API_KEY")
@@ -78,6 +80,7 @@ class Settings(BaseSettings):
         "scout_tailor_model",
         "scout_fetch_model",
         "openai_base_url",
+        "nvidia_base_url",
         "ollama_base_url",
         mode="before",
     )

@@ -15,6 +15,8 @@ def health() -> dict[str, object]:
     model = settings.scout_model
     if model.startswith("groq:"):
         has_llm_credentials = bool(settings.groq_api_key.get_secret_value())
+    elif model.startswith("nvidia:"):
+        has_llm_credentials = bool(settings.nvidia_api_key.get_secret_value())
     elif model.startswith("ollama:"):
         # Ollama is local and does not use an API key. Connectivity is checked
         # only when the first model call is made, never by this keyless probe.

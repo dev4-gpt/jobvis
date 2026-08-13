@@ -42,6 +42,11 @@ def _export_provider_env(model: str) -> None:
             key = settings.groq_api_key.get_secret_value()
             if key:
                 os.environ["GROQ_API_KEY"] = key
+    elif model.startswith("nvidia:"):
+        if not os.environ.get("NVIDIA_API_KEY"):
+            key = settings.nvidia_api_key.get_secret_value()
+            if key:
+                os.environ["NVIDIA_API_KEY"] = key
     elif model.startswith("ollama:"):
         if not os.environ.get("OLLAMA_HOST") and settings.ollama_base_url:
             os.environ["OLLAMA_HOST"] = settings.ollama_base_url
@@ -51,6 +56,16 @@ def _export_provider_env(model: str) -> None:
 def get_chat_model(model: str, temperature: float = 0.0) -> BaseChatModel:
     """Return a cached chat model for a LangChain provider string (e.g. ``openai:gpt-4o-mini``)."""
     _export_provider_env(model)
+    if model.startswith("nvidia:"):
+        from langchain_openai import ChatOpenAI
+
+        settings = get_settings()
+        return ChatOpenAI(
+            model=model.removeprefix("nvidia:"),
+            api_key=settings.nvidia_api_key.get_secret_value(),
+            base_url=settings.nvidia_base_url,
+            temperature=temperature,
+        )
     return init_chat_model(model, temperature=temperature)
 
 
