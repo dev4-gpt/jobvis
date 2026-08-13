@@ -20,7 +20,7 @@ any project changes.
 Run from the repository root:
 
 ```bash
-uv sync --all-groups
+uv sync --all-groups --no-editable
 uv run pytest
 uv run ruff check .
 uv run pytest gates/ -v
