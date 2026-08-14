@@ -111,9 +111,7 @@ def test_on_find_searches_the_chosen_locations(tmp_store, fresh_bridge, sample_p
     assert tmp_store.load_candidate().preferences == {"locations": ["Tokyo, Japan"], "remote": True}
 
 
-def test_us_scope_means_any_city_and_is_persisted_as_country_scope(
-    tmp_store, fresh_bridge, sample_profile, monkeypatch
-):
+def test_us_scope_means_any_city_and_is_persisted_as_country_scope(tmp_store, fresh_bridge, sample_profile, monkeypatch):
     from job_scout.runner import RunResult
 
     seen = {}

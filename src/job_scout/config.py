@@ -128,6 +128,7 @@ class Settings(BaseSettings):
         """Whether Jobvis has both an ElevenLabs API key and an agent id."""
         return bool(self.elevenlabs_api_key.get_secret_value() and self.elevenlabs_agent_id)
 
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return the process-wide settings singleton."""

@@ -645,6 +645,7 @@ def _apply_preferences(profile: Profile, preferences: dict | None) -> Profile:
         locations = [US_SCOPE_CHOICE]
     return profile.model_copy(update={"locations": locations, "remote_ok": bool(preferences.get("remote"))})
 
+
 def _preference_selection(profile: Profile, preferences: dict | None) -> tuple[list[str], list[str]]:
     """(choices, selected) for the chooser — stored preferences win, else the extraction's suggestion."""
     if preferences:
