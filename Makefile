@@ -17,8 +17,28 @@ setup: ## Install deps and pre-commit hooks
 	uv run pre-commit install
 
 .PHONY: app
-app: ## Launch the Gradio app
+app: ## Launch both surfaces: the wizard on :7860 and the Jobvis console on :8000
 	$(UV_RUN) python -m job_scout.app
+
+.PHONY: jobvis-api
+jobvis-api: ## API only, no wizard — for frontend work with `make web-dev` (empty session)
+	uv run python -m job_scout.api
+
+.PHONY: web-build
+web-build: ## Build the Jobvis console into web/out (static export served by `make jobvis`)
+	cd web && npm ci && npm run build
+
+.PHONY: web-dev
+web-dev: ## Next dev server on :3000 against the API on :8000 (run `make jobvis` too)
+	cd web && npm run dev
+
+.PHONY: web-assets
+web-assets: ## Vendor the MediaPipe hand-tracking assets (only needed for gesture control)
+	@mkdir -p web/public/mediapipe/wasm
+	cp web/node_modules/@mediapipe/tasks-vision/wasm/* web/public/mediapipe/wasm/
+	curl -fL -o web/public/mediapipe/hand_landmarker.task \
+		https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+	@echo "gestures ready — set NEXT_PUBLIC_JOBVIS_GESTURES=1 in web/.env.local and rebuild"
 
 .PHONY: batch
 batch: ## Run the baseline batch (prompts for --yes cost confirmation)
@@ -49,6 +69,10 @@ evals: ## Show the eval harness usage (each suite prompts for --yes)
 .PHONY: queue
 queue: ## Create the Opik annotation queue + feedback definitions
 	$(UV_RUN) python scripts/setup_annotation_queue.py --queue
+
+.PHONY: jobvis-agent
+jobvis-agent: ## Create/update the Jobvis ElevenLabs agent (prints the agent id)
+	uv run python scripts/setup_jobvis_agent.py
 
 .PHONY: test
 test: ## Run the test suite

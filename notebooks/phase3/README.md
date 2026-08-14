@@ -75,3 +75,4 @@ be `notebooks/` (normal Jupyter behavior).
 - [Opik tracing concepts](https://www.comet.com/docs/opik/tracing/log_traces)
 - [`../../docs/optimizing_latency.md`](../../docs/optimizing_latency.md) — the
   latency chapter this one continues, including an honest failed optimization
+- [`../../docs/jobvis.md`](../../docs/jobvis.md) — the voice console

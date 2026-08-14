@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -58,6 +59,31 @@ _COUNTRY_CODES: dict[str, str] = {
     "canada": "ca", "france": "fr", "spain": "es", "netherlands": "nl",
     "singapore": "sg", "poland": "pl", "italy": "it",
 }  # fmt: skip
+
+
+logger = logging.getLogger(__name__)
+
+
+def _failed(source: str, exc: Exception) -> list[JobPosting]:
+    """Record why a source returned nothing, then return nothing.
+
+    Every source used to answer an exhausted quota, a rejected key and a genuine
+    zero-result search with the same empty list, which made the three
+    indistinguishable from the outside. JSearch spent a week returning HTTP 429
+    while the cascade quietly fell through to a worse board and nobody could
+    tell, because "no jobs" is exactly what a working search looks like on a
+    quiet day. The reason belongs somewhere a human will actually see it.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        hint = {401: "key rejected", 403: "key lacks access", 429: "quota exhausted"}.get(code, "")
+        reason = f"HTTP {code}{f' ({hint})' if hint else ''}"
+    elif isinstance(exc, httpx.TimeoutException):
+        reason = "timed out"
+    else:
+        reason = type(exc).__name__
+    logger.warning("job source %s returned no jobs: %s", source, reason)
+    return []
 
 
 def location_to_country(location: str | None) -> str:
@@ -129,8 +155,8 @@ class JSearchSource:
             resp = httpx.get(self.BASE, params=params, headers={"X-API-Key": self.api_key}, timeout=self.timeout)
             resp.raise_for_status()
             data = resp.json()
-        except (httpx.HTTPError, json.JSONDecodeError, ValueError):
-            return []
+        except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+            return _failed("jsearch", exc)
         payload = data.get("data")
         rows = payload.get("jobs") if isinstance(payload, dict) else payload if isinstance(payload, list) else []
         return [self._to_posting(r) for r in (rows or [])[:limit]]
@@ -195,8 +221,8 @@ class AdzunaSource:
             resp = httpx.get(f"{self.BASE}/{code}/search/1", params=params, timeout=self.timeout)
             resp.raise_for_status()
             data = resp.json()
-        except (httpx.HTTPError, json.JSONDecodeError, ValueError):
-            return []
+        except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+            return _failed("adzuna", exc)
         return [self._to_posting(r, code) for r in data.get("results", [])]
 
     @staticmethod
@@ -231,8 +257,8 @@ class RemotiveSource:
             resp = httpx.get(self.BASE, params={"search": query, "limit": limit}, timeout=self.timeout)
             resp.raise_for_status()
             data = resp.json()
-        except (httpx.HTTPError, json.JSONDecodeError, ValueError):
-            return []
+        except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+            return _failed("remotive", exc)
         return [self._to_posting(r) for r in data.get("jobs", [])[:limit]]
 
     @staticmethod
@@ -462,7 +488,10 @@ def search_jobs(query: str, country: str | None = None, remote: bool = False, li
     """Search for open job postings matching a query.
 
     Args:
-        query: Role/skill search terms, e.g. "machine learning engineer python".
+        query: A job TITLE at the right seniority, 2-4 words, e.g. "senior data
+            scientist". Boards match this against posting titles, so every extra
+            skill or synonym narrows the match: a title-only query returns real
+            roles where a keyword list returns nothing at all.
         country: Two-letter country code (us, gb, de, in, au, br, ...). Omit to
             infer it from the query text.
         remote: Set true to prioritise remote-friendly roles.

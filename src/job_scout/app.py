@@ -8,6 +8,11 @@ locations and remote, not the model), (3) find jobs — ranked as cards with a
 conic-gauge fit score, matched-skill chips, and honest gaps — and (4) tailor an
 application for a selected job: cover letter + reworded CV, every claim checked
 against the resume, downloadable as PDF/.tex.
+
+Jobvis, the voice concierge, is a separate surface now (job_scout.api serves it
+on :8000) — the wizard just links to it. What stays here is the sync: a run
+started by voice lands on these pages through the 1s Timer, and a click here
+whispers a screen event to whoever is listening on the console.
 """
 
 from __future__ import annotations
@@ -26,6 +31,8 @@ from job_scout.renderer import render_pdf
 from job_scout.runner import RunResult, TailorResult, stream_search, stream_tailor
 from job_scout.tools.cv_reader import CVReadError, extract_cv_text
 from job_scout.tracing import opik_url, register_prompts
+from job_scout.voice import bridge as voice_bridge
+from job_scout.voice import is_voice_available
 
 CAPTION = "Prepares applications — never submits them."
 
@@ -269,6 +276,17 @@ footer { display: none !important; }
 .js-page { background: transparent !important; border: none !important; box-shadow: none !important; }
 .js-page > .styler, .js-page .form { background: transparent !important; border: none !important; box-shadow: none !important; }
 
+/* --- Jobvis: a one-line pointer at the voice console on :8000 --- */
+#jv-strip { display: flex; align-items: center; justify-content: center; gap: 12px;
+  background: linear-gradient(140deg, #1A241F 0%, #101713 100%);
+  border: 1px solid rgba(14,156,104,0.28); border-radius: 18px;
+  padding: 12px 18px; margin: 2px 0 10px; box-shadow: 0 14px 40px rgba(10, 20, 16, 0.28); }
+#jv-strip .jv-hint { margin: 0; color: rgba(236,242,238,0.72); }
+.jv-hint { text-align: center; font-size: 0.78rem; color: var(--body-text-color-subdued); margin: 6px 0 0; }
+.jv-link { font-family: 'IBM Plex Mono', monospace; font-size: 0.76rem; color: #7DE3B5 !important;
+  text-decoration: none; white-space: nowrap; }
+.jv-link:hover { text-decoration: underline; }
+
 /* accessibility: visible focus */
 a:focus-visible, button:focus-visible, .js-job-title:focus-visible {
   outline: 2px solid var(--js-accent); outline-offset: 2px; border-radius: 4px; }
@@ -510,7 +528,7 @@ def _status(text: str, error: bool = False) -> str:
 
 
 def _pack_downloads(result: TailorResult, profile: Profile | None) -> tuple[dict, dict, str]:
-    """Footer + download-button updates for a finished tailoring run."""
+    """Footer + download-button updates for a finished tailoring run (click or voice)."""
     hidden = gr.update(visible=False)
     footer = _tailor_footer_html(result)
     pdf_btn, tex_btn = hidden, hidden
@@ -523,6 +541,76 @@ def _pack_downloads(result: TailorResult, profile: Profile | None) -> tuple[dict
         elif render.message:
             footer = f'<div class="js-footer">{escape(render.message)}</div>{footer}'
     return pdf_btn, tex_btn, footer
+
+
+def _voice_context(text: str) -> None:
+    """Tell a listening console what just happened on screen (silent context)."""
+    voice_bridge.get_bridge().note_screen_event(text)
+
+
+def on_run_tick():
+    """Mirror a voice-triggered run into the wizard's pages.
+
+    The console holds the conversation, but the click path still owns these
+    screens, so a run started by voice has to land here too. While a run is IN
+    FLIGHT this shows the runner's live status lines ("ranking 12 jobs…") so
+    the page never sits frozen; when the bridge hands over the finished run,
+    the SAME renderers the click path uses fill it in. Announcing the result is
+    the console's job now — it hears the same run on its own feed.
+    """
+    no = gr.update()
+    bridge = voice_bridge.get_bridge()
+    run = bridge.pop_finished_run()
+    if run is None:
+        progress = bridge.run_status()
+        if progress.get("running"):
+            loading = _loading_html(str(progress.get("latest_status") or "working…"))
+            if progress.get("kind") == "search":
+                show_results = (gr.update(visible=False), gr.update(visible=True), gr.update(visible=False))
+                return (*show_results, loading, "", no, no, no, no, no)
+            return (
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(visible=True),
+                no,
+                no,
+                no,
+                loading,
+                "",
+                gr.update(visible=False),
+                gr.update(visible=False),
+            )
+    if run is not None and run.kind == "search" and run.search_result is not None and not run.failed:
+        result = run.search_result
+        choices = [(f"{r.job.title} — {r.job.company} (fit {r.fit_score})", r.job.job_id) for r in result.ranked_jobs]
+        return (
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.update(visible=False),
+            _results_html(result),
+            _footer_html(result),
+            gr.update(choices=choices, value=None, visible=bool(choices)),
+            no,
+            no,
+            no,
+            no,
+        )
+    if run is not None and run.kind == "tailor" and run.tailor_result is not None and not run.failed:
+        result = run.tailor_result
+        pdf_btn, tex_btn, footer = _pack_downloads(result, bridge.snapshot().profile)
+        return (
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=True),
+            no,
+            no,
+            no,
+            _pack_html(result),
+            footer,
+            pdf_btn,
+            tex_btn,
+        )
+    return (no,) * 10
 
 
 REMOTE_CHOICE = "Remote (anywhere)"
@@ -557,7 +645,6 @@ def _apply_preferences(profile: Profile, preferences: dict | None) -> Profile:
         locations = [US_SCOPE_CHOICE]
     return profile.model_copy(update={"locations": locations, "remote_ok": bool(preferences.get("remote"))})
 
-
 def _preference_selection(profile: Profile, preferences: dict | None) -> tuple[list[str], list[str]]:
     """(choices, selected) for the chooser — stored preferences win, else the extraction's suggestion."""
     if preferences:
@@ -572,10 +659,11 @@ def _preference_selection(profile: Profile, preferences: dict | None) -> tuple[l
 
 
 def on_prefs_change(selection: list[str], profile: Profile | None, cv_text: str, thread_id: str) -> None:
-    """Persist the chooser's state."""
+    """Persist the chooser's state and keep the voice bridge on the same page."""
     if profile is None:
         return
     prefs = _selection_to_prefs(selection)
+    voice_bridge.get_bridge().record_profile(candidate_store.effective_profile(profile, prefs), cv_text, thread_id)
     candidate_store.save_candidate(profile, cv_text, prefs)
 
 
@@ -594,19 +682,22 @@ def on_add_location(new_location: str, choices: list[str], selection: list[str],
 
 
 def _on_load(thread_id: str):
-    """Restore a saved candidate.
+    """Register the wizard thread with the voice bridge and restore a saved candidate.
 
     With a stored candidate the app opens on step 2 — profile shown, chooser
-    restored, Find jobs ready — and no LLM call happens
+    restored, Find jobs ready, Jobvis pre-seeded — and no LLM call happens
     (the extraction was paid for when the CV was first uploaded). Jobs are NOT
     restored: results go stale, so every session fetches fresh.
     Outputs: (page_start, page_profile, profile_html, cv_text_state,
     profile_state, loc_choices_state, loc_group).
     """
+    voice_bridge.get_bridge().register_thread(thread_id)
     stored = candidate_store.load_candidate()
     if stored is None:
         return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
     choices, selected = _preference_selection(stored.profile, stored.preferences)
+    effective = candidate_store.effective_profile(stored.profile, stored.preferences)
+    voice_bridge.get_bridge().record_profile(effective, stored.cv_text, thread_id)
     note = (
         '<p class="js-muted" style="text-align:center;font-size:0.8rem;margin-top:10px">'
         "Restored from your last session — “Start over” forgets it.</p>"
@@ -653,7 +744,9 @@ def on_upload(file_path: str | None, thread_id: str):
         yield (*stay, gr.update(), "", _status(msg, error=True), None, no, no)
         return
     choices, selected = _preference_selection(profile, None)
+    voice_bridge.get_bridge().record_profile(profile, cv_text, thread_id)
     candidate_store.save_candidate(profile, cv_text, _selection_to_prefs(selected))
+    _voice_context(f"Screen event: the user just uploaded a CV; a profile was extracted for {profile.name or 'the candidate'}.")
     yield (*go, _profile_html(profile), cv_text, "", profile, choices, gr.update(choices=choices, value=selected))
 
 
@@ -671,7 +764,8 @@ def on_find(cv_text: str, profile: Profile | None, thread_id: str, loc_selection
         return
 
     prefs = _selection_to_prefs(loc_selection or [])
-    effective = _apply_preferences(profile, prefs)
+    effective = candidate_store.effective_profile(profile, prefs)
+    voice_bridge.get_bridge().record_profile(effective, cv_text, thread_id)
     candidate_store.save_candidate(profile, cv_text, prefs)
 
     yield (*go, _loading_html("Searching for jobs…"), "", gr.update())
@@ -684,11 +778,14 @@ def on_find(cv_text: str, profile: Profile | None, thread_id: str, loc_selection
 
     choices = [(f"{r.job.title} — {r.job.company} (fit {r.fit_score})", r.job.job_id) for r in result.ranked_jobs]
     select = gr.update(choices=choices, value=None, visible=bool(choices))
+    voice_bridge.get_bridge().record_step("results")
+    _voice_context(f"Screen event: an on-screen job search just finished — {len(result.ranked_jobs)} ranked jobs are visible.")
     yield (*go, _results_html(result), _footer_html(result), select)
 
 
 def on_zip(zip_path: str | None) -> str | None:
     """Store the optional LinkedIn export path in session state (path only, never traced)."""
+    voice_bridge.get_bridge().record_linkedin_zip(zip_path)
     return zip_path
 
 
@@ -722,6 +819,8 @@ def on_tailor(selected_job_id: str | None, thread_id: str, linkedin_zip: str | N
             result = payload  # type: ignore[assignment]
 
     pdf_btn, tex_btn, footer = _pack_downloads(result, profile)
+    voice_bridge.get_bridge().record_step("tailor")
+    _voice_context("Screen event: an application pack was just tailored via the on-screen button and is now visible.")
     yield (*go, _pack_html(result), footer, pdf_btn, tex_btn)
 
 
@@ -739,6 +838,7 @@ def reset():
     loc_choices_state, loc_group).
     """
     new_thread_id = str(uuid4())
+    voice_bridge.get_bridge().register_thread(new_thread_id)
     candidate_store.clear_candidate()
     return (
         gr.update(visible=True),
@@ -776,6 +876,15 @@ def build_app() -> gr.Blocks:
             f'<div id="js-header"><div class="js-mark">{_MARK}<h1>Job Scout</h1></div>'
             f'<div><span class="js-tag">{CAPTION}</span></div></div>'
         )
+
+        voice_ok, voice_hint = is_voice_available()
+        if voice_ok:
+            gr.HTML(
+                '<div id="jv-strip"><span class="jv-hint">Jobvis, the voice concierge, runs in its own console.</span>'
+                '<a class="jv-link" href="http://localhost:8000" target="_blank" rel="noopener">Talk to Jobvis ↗</a></div>'
+            )
+        else:
+            gr.HTML(f'<p class="jv-hint">{escape(voice_hint)}</p>')
 
         with gr.Group(visible=True, elem_classes=["js-page"]) as page_start:
             gr.HTML(_stepper(1))
@@ -893,10 +1002,29 @@ def build_app() -> gr.Blocks:
         restart_btn.click(reset, outputs=reset_outputs)
         restart_btn2.click(reset, outputs=reset_outputs)
 
-        # Restore on page load. A load event (not a Timer): on a MOUNTED app the
-        # client only opens its event connection on the first event, so a timer
-        # never fires unprimed. demo.load is safe on a standalone app; it was
-        # only demo.route multipage that crashed on cross-page load events.
+        if voice_ok:
+            # A run started by voice in the console still has to land on these
+            # pages. The Timer must sit at Blocks ROOT level: one created inside
+            # a layout container can miss the client render tree, and its null
+            # instance kills the frontend at dispatch_load_events (Gradio 6.20).
+            gr.Timer(1.0).tick(
+                on_run_tick,
+                outputs=[
+                    page_profile,
+                    page_results,
+                    page_tailor,
+                    results_out,
+                    footer_out,
+                    job_select,
+                    tailor_out,
+                    tailor_footer,
+                    pdf_btn,
+                    tex_btn,
+                ],
+            )
+        # Restore on page load. A load event, not a Timer: the client only opens
+        # its event connection on the first event, so an unprimed timer never
+        # fires.
         demo.load(
             _on_load,
             inputs=[thread_id],
@@ -907,8 +1035,20 @@ def build_app() -> gr.Blocks:
 
 
 def main() -> None:
-    """Serve the wizard on :7860, or the next free port (GRADIO_SERVER_PORT overrides)."""
-    build_app().launch(server_name="127.0.0.1", theme=THEME, css=CSS)
+    """Serve both surfaces from ONE process: wizard on :7860, Jobvis on :8000.
+
+    One process is not a convenience here, it is a correctness requirement. The
+    voice bridge and the LangGraph ``MemorySaver`` are both process-wide, so
+    running the two servers separately gives you two sessions wearing the same
+    name: the wizard finds jobs the console cannot see, and Jobvis truthfully
+    reports an empty checkpoint. The API goes on a daemon thread first; Gradio
+    keeps the main thread, as it prefers to.
+    """
+    from job_scout.api import CONSOLE_PORT, serve_in_thread
+
+    serve_in_thread()
+    print(f"Jobvis console: http://localhost:{CONSOLE_PORT}")
+    build_app().launch(server_name="127.0.0.1", server_port=7860, theme=THEME, css=CSS)
 
 
 if __name__ == "__main__":

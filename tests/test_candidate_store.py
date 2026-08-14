@@ -6,6 +6,8 @@ import pytest
 
 import job_scout.app as app_module
 import job_scout.candidate_store as candidate_store
+import job_scout.voice.bridge as bridge_module
+from job_scout.voice.bridge import VoiceBridge
 
 
 @pytest.fixture
@@ -56,12 +58,21 @@ def test_clear_candidate(tmp_store, sample_profile):
     tmp_store.clear_candidate()  # idempotent on an empty store
 
 
-def test_on_load_without_store_is_a_noop(tmp_store):
+@pytest.fixture
+def fresh_bridge(monkeypatch) -> VoiceBridge:
+    bridge = VoiceBridge()
+    monkeypatch.setattr(bridge_module, "_BRIDGE", bridge)
+    return bridge
+
+
+def test_on_load_without_store_is_a_noop(tmp_store, fresh_bridge):
     updates = app_module._on_load("t1")
     assert all("visible" not in update for update in updates)
+    assert fresh_bridge.snapshot().thread_id == "t1"
+    assert fresh_bridge.snapshot().profile is None
 
 
-def test_on_load_restores_candidate_and_opens_step_two(tmp_store, sample_profile):
+def test_on_load_restores_candidate_and_opens_step_two(tmp_store, fresh_bridge, sample_profile):
     tmp_store.save_candidate(sample_profile, "cv text here", {"locations": ["Tokyo, Japan"], "remote": False})
 
     page_start, page_profile, profile_html, cv_text, profile, loc_choices, loc_group = app_module._on_load("t1")
@@ -71,15 +82,18 @@ def test_on_load_restores_candidate_and_opens_step_two(tmp_store, sample_profile
     assert cv_text == "cv text here"
     assert profile == sample_profile  # the RAW profile — extraction stays what was measured
     assert "Tokyo, Japan" in loc_choices and loc_group["value"] == ["Tokyo, Japan"]  # stored choice wins, remote off
+    snap = fresh_bridge.snapshot()
+    assert snap.profile.locations == ["Tokyo, Japan"] and snap.profile.remote_ok is False  # Jobvis sees the choice
+    assert snap.step == "profile"
 
 
-def test_reset_forgets_the_stored_candidate(tmp_store, sample_profile):
+def test_reset_forgets_the_stored_candidate(tmp_store, fresh_bridge, sample_profile):
     tmp_store.save_candidate(sample_profile, "cv")
     app_module.reset()
     assert tmp_store.load_candidate() is None
 
 
-def test_on_find_searches_the_chosen_locations(tmp_store, sample_profile, monkeypatch):
+def test_on_find_searches_the_chosen_locations(tmp_store, fresh_bridge, sample_profile, monkeypatch):
     from job_scout.runner import RunResult
 
     seen = {}
@@ -97,7 +111,9 @@ def test_on_find_searches_the_chosen_locations(tmp_store, sample_profile, monkey
     assert tmp_store.load_candidate().preferences == {"locations": ["Tokyo, Japan"], "remote": True}
 
 
-def test_us_scope_means_any_city_and_is_persisted_as_country_scope(tmp_store, sample_profile, monkeypatch):
+def test_us_scope_means_any_city_and_is_persisted_as_country_scope(
+    tmp_store, fresh_bridge, sample_profile, monkeypatch
+):
     from job_scout.runner import RunResult
 
     seen = {}
@@ -115,7 +131,7 @@ def test_us_scope_means_any_city_and_is_persisted_as_country_scope(tmp_store, sa
     assert tmp_store.load_candidate().preferences == {"locations": [], "remote": True, "country_scope": "us"}
 
 
-def test_on_add_location_ticks_and_persists(tmp_store, sample_profile):
+def test_on_add_location_ticks_and_persists(tmp_store, fresh_bridge, sample_profile):
     choices = ["Berlin, Germany", app_module.REMOTE_CHOICE]
     new_choices, group_update, cleared = app_module.on_add_location(
         "  Lisbon  ", choices, ["Berlin, Germany"], sample_profile, "cv", "t1"

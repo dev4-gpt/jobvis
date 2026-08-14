@@ -4,7 +4,7 @@
 measure again. Every number below comes from a traced run you can reproduce.*
 
 The complaint that started it: a voice-triggered job search felt endless —
-the user asks for jobs and waits the better part of a minute. The wrong
+the user asks Jobvis for jobs and waits the better part of a minute. The wrong
 move is guessing. The right move is opening the trace: every run is traced in
 Opik with one span per graph node, so the span tree already says where the
 time goes — and it was not where intuition pointed. The job API (RapidAPI

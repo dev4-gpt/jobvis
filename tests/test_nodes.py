@@ -30,6 +30,40 @@ def test_fetch_jobs_uses_llm_tool_args(monkeypatch, sample_profile, sample_jobs)
     assert out["llm_calls"] == 2
 
 
+def test_fetch_jobs_trims_keyword_soup_to_a_title(monkeypatch, sample_profile, sample_jobs):
+    """A long query is cut to title length, and the trim is recorded.
+
+    Boards match the query against posting titles, so the soup both models used
+    to produce matched nothing and the cascade fell through to the remote-only
+    board. The prompt asks for a title; this guarantees one.
+    """
+    soup = "Senior Data Scientist AI Engineer deep learning neural networks LLMs RAG systems"
+    llm = tool_calling_llm([{"name": "search_jobs", "args": {"query": soup, "country": "de", "remote": False}}])
+    monkeypatch.setattr(fetch_mod, "get_chat_model", lambda *a, **k: llm)
+    captured = {}
+
+    def fake_run_search(query, location, country, remote, limit):
+        captured["query"] = query
+        return sample_jobs, ["adzuna"]
+
+    monkeypatch.setattr(fetch_mod, "run_search", fake_run_search)
+    out = fetch_jobs({"profile": sample_profile, "llm_calls": 0})
+
+    assert captured["query"] == "Senior Data Scientist AI Engineer deep"
+    assert out["search_query"] == captured["query"]
+    # Silently trimming would hide exactly the signal worth seeing in the trace.
+    assert any("query trimmed" in e and "learning neural networks" in e for e in out["errors"])
+
+
+def test_fetch_jobs_leaves_a_title_query_alone(monkeypatch, sample_profile, sample_jobs):
+    llm = tool_calling_llm([{"name": "search_jobs", "args": {"query": "senior data scientist", "country": "de"}}])
+    monkeypatch.setattr(fetch_mod, "get_chat_model", lambda *a, **k: llm)
+    monkeypatch.setattr(fetch_mod, "run_search", lambda **k: (sample_jobs, ["adzuna"]))
+    out = fetch_jobs({"profile": sample_profile, "llm_calls": 0})
+    assert out["search_query"] == "senior data scientist"
+    assert not any("trimmed" in e for e in out["errors"])
+
+
 def test_fetch_jobs_no_tool_call_fallback(monkeypatch, sample_profile, sample_jobs):
     llm = tool_calling_llm([])  # model issued no tool call
     monkeypatch.setattr(fetch_mod, "get_chat_model", lambda *a, **k: llm)

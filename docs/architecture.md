@@ -11,10 +11,21 @@ The diagram above is also available as editable Mermaid source:
 ```mermaid
 flowchart TB
   U(["User"]) -->|"upload CV (PDF)"| UI
+  U -->|"speaks"| VC
 
-  subgraph UI_L["Gradio UI · app.py"]
+  subgraph UI_L["Gradio wizard · app.py · :7860"]
     UI["4-step wizard<br/>Resume → Profile → Jobs → Tailor<br/>streamed status · fit gauges · footer"]
   end
+
+  subgraph VOICE["Jobvis voice console · web/ + api.py · :8000"]
+    VC["Next.js + Three.js orb<br/>WebRTC conversation in the browser"]
+    API["FastAPI<br/>session token · tool dispatch · state · SSE"]
+    VC <-->|"POST /api/tools/*<br/>GET /api/events"| API
+  end
+
+  API --> BR["voice/bridge.py<br/>wizard registry · run manager · event feeds"]
+  BR --> RUN
+  BR -->|"reads"| G
 
   UI -->|"filepath"| CVR["cv_reader.py<br/>pypdf: PDF → text"]
   CVR -->|"CV text"| EP["profile.py · extract_profile<br/>1 LLM call · structured output"]
@@ -47,7 +58,7 @@ flowchart TB
   FJ -->|"query · country · remote"| SRCH
   subgraph SRCH["run_search cascade · jobs_api.py (fall-through, keyless-safe)"]
     direction LR
-    JS["JSearch<br/>primary"] --> AZ["Adzuna<br/>international"] --> RM["Remotive<br/>keyless"] --> CA["Cache<br/>~247 offline jobs"]
+    JS["JSearch<br/>primary · own span"] --> AZ["Adzuna<br/>international · own span"] --> RM["Remotive<br/>keyless · own span"] --> CA["Cache<br/>~247 offline jobs"]
   end
   SRCH -->|"JobPostings"| RJ
 
@@ -64,12 +75,13 @@ flowchart TB
   TL -. "LLM (SCOUT_TAILOR_MODEL, temp 0.3)" .-> OA
 
   subgraph OBS["Opik observability · tracing.py"]
-    TR["track_langgraph + OpikTracer<br/>span tree · agent graph · per-run cost"]
-    PL["prompt library<br/>3 prompts, versioned"]
+    TR["OpikTracer<br/>span tree · agent graph · per-run cost"]
+    PL["prompt library<br/>4 prompts, versioned"]
     AT["CV attached to trace"]
   end
   RUN -. "wrap + traces" .-> TR
   G -. "spans" .-> TR
+  SRCH -. "one span per source" .-> TR
   EP -. "register" .-> PL
   CVR -. "PDF" .-> AT
 
@@ -81,6 +93,7 @@ flowchart TB
   class OA,LLM_L llm;
   class TR,PL,AT,OBS obs;
   class FJ,RJ,RQ,TL,VT node;
+  class VC,API,VOICE llm;
 ```
 
 ## Reading it
@@ -111,9 +124,22 @@ flowchart TB
    invocation, same thread, no recomputation" trace possible — and makes
    explicitly nulling `selected_job_id` on every search invocation mandatory
    (the runner does; the phase 2 notebook demonstrates the stale-state bug).
-6. **Cross-cutting (dotted).** Every node's LLM call goes through `llm.py`
+6. **Two surfaces, one session (Phase 3).** The Gradio wizard on :7860 owns the
+   click path; the **Jobvis voice console** on :8000 owns the conversation. The
+   console is a static Next.js export served by `api.py`, and the conversation
+   itself runs in the browser over WebRTC — which buys real barge-in and the
+   browser's own echo cancellation. Nothing the agent may *know* went with it:
+   client tools POST to `/api/tools/{name}` and resolve in `voice/tools.py`
+   against the same checkpoint. Both servers live in **one process** (the bridge
+   and the `MemorySaver` are process-wide, so splitting them would give you two
+   sessions wearing one name), and `voice/bridge.py` gives each surface its own
+   event feed so a finished run reaches both instead of racing them.
+   See [`jobvis.md`](jobvis.md).
+7. **Cross-cutting (dotted).** Every node's LLM call goes through `llm.py`
    (provider-agnostic + a per-run call budget; the budget is per-THREAD now that
    search and tailor share a checkpoint). **Opik** traces every run: span tree,
    the auto-drawn agent graph (per-run tracer via `trace_graph`), per-run cost,
    the versioned prompt library (4 prompts), and the CV attached to the trace.
+   Since Phase 3 each job source gets its own span, which is what makes "which
+   source was slow?" an answerable question — see [`ollie.md`](ollie.md).
    `config.py` supplies keys and settings.

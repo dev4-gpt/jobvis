@@ -14,6 +14,8 @@ dependencies = [
     "langchain-core>=0.3",
     "opik>=2.2",
     "gradio>=5",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
     "pypdf>=5",
     "pydantic>=2.11",
     "pydantic-settings>=2.6",
@@ -35,13 +37,13 @@ dev = [
 ]
 
 [project.optional-dependencies]
-optimize = [
-    "opik-optimizer>=3.1",
-]
 # Documented alternative provider (see .env.example). Install with:
 #   uv sync --extra groq
 groq = ["langchain-groq>=0.2"]
 ollama = ["langchain-ollama>=0.2"]
+optimize = [
+    "opik-optimizer>=3.1",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -95,6 +95,30 @@ def test_jsearch_unavailable_without_key():
     assert src.fetch("data scientist", "Berlin", "de", False, 10) == []
 
 
+def test_source_failure_is_logged_not_swallowed(respx_mock, caplog):
+    """An exhausted quota must not look like a quiet day in the job market.
+
+    Returning [] is still the right behaviour — the cascade depends on it — but
+    returning it *silently* made HTTP 429, a rejected key and a genuine
+    zero-result search indistinguishable from outside.
+    """
+    respx_mock.get("https://api.openwebninja.com/jsearch/search-v2").mock(
+        return_value=httpx.Response(429, json={"error": {"message": "Too Many Requests"}})
+    )
+    src = JSearchSource(api_key="k")
+    with caplog.at_level("WARNING"):
+        assert src.fetch("data scientist", "Berlin", "de", False, 10) == []
+    assert "jsearch" in caplog.text
+    assert "429" in caplog.text and "quota exhausted" in caplog.text
+
+
+def test_source_failure_names_a_rejected_key(respx_mock, caplog):
+    respx_mock.get("https://api.openwebninja.com/jsearch/search-v2").mock(return_value=httpx.Response(401, json={}))
+    with caplog.at_level("WARNING"):
+        assert JSearchSource(api_key="k").fetch("x", "Berlin", "de", False, 10) == []
+    assert "key rejected" in caplog.text
+
+
 def test_jsearch_builds_location_query_and_maps_fields(respx_mock):
     payload = {
         "data": {

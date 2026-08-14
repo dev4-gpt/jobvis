@@ -17,6 +17,8 @@ os.environ["ADZUNA_APP_ID"] = ""
 os.environ["ADZUNA_APP_KEY"] = ""
 os.environ["JSEARCH_API_KEY"] = ""
 os.environ["TAVILY_API_KEY"] = ""
+os.environ["ELEVENLABS_API_KEY"] = ""
+os.environ["ELEVENLABS_AGENT_ID"] = ""
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 # Pin tunable knobs to their defaults so a developer's .env tuning
 # (e.g. SCOUT_MAX_REFORMULATIONS=0 or looser validator ratios) can't

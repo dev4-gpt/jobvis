@@ -26,6 +26,7 @@ from job_scout.graph.schemas import Profile
 
 _STORE_DIR = Path(__file__).resolve().parents[2] / "data" / "candidate"
 _STORE_PATH = _STORE_DIR / "profile.json"
+_US_SCOPE_LOCATION = "Anywhere in the United States"
 
 
 class StoredCandidate(NamedTuple):
@@ -56,3 +57,17 @@ def load_candidate() -> StoredCandidate | None:
 def clear_candidate() -> None:
     """Forget the stored candidate (the wizard's "start over")."""
     _STORE_PATH.unlink(missing_ok=True)
+
+
+def effective_profile(profile: Profile, preferences: dict | None) -> Profile:
+    """The profile the SEARCH sees: extraction fields overridden by the human's choice.
+
+    The stored profile stays untouched — it is what the extractor measured and
+    what evaluation grades. Only the search runs on the chosen locations.
+    """
+    if not preferences:
+        return profile
+    locations = list(preferences.get("locations") or [])
+    if preferences.get("country_scope") == "us":
+        locations = [_US_SCOPE_LOCATION]
+    return profile.model_copy(update={"locations": locations, "remote_ok": bool(preferences.get("remote"))})

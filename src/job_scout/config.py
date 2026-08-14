@@ -52,6 +52,10 @@ class Settings(BaseSettings):
 
     tavily_api_key: SecretStr = Field(default=SecretStr(""), alias="TAVILY_API_KEY")
 
+    elevenlabs_api_key: SecretStr = Field(default=SecretStr(""), alias="ELEVENLABS_API_KEY")
+    elevenlabs_agent_id: str = Field(default="", alias="ELEVENLABS_AGENT_ID")
+    elevenlabs_voice_id: str = Field(default="", alias="ELEVENLABS_VOICE_ID")
+
     max_llm_calls_per_run: int = Field(default=25, alias="MAX_LLM_CALLS_PER_RUN")
     scout_max_jobs: int = Field(default=10, alias="SCOUT_MAX_JOBS")
     scout_max_reformulations: int = Field(default=2, alias="SCOUT_MAX_REFORMULATIONS")
@@ -82,6 +86,8 @@ class Settings(BaseSettings):
         "openai_base_url",
         "nvidia_base_url",
         "ollama_base_url",
+        "elevenlabs_agent_id",
+        "elevenlabs_voice_id",
         mode="before",
     )
     @classmethod
@@ -117,6 +123,10 @@ class Settings(BaseSettings):
         """Whether Opik tracing is enabled and has an API key."""
         return self.opik_enabled and bool(self.opik_api_key.get_secret_value())
 
+    @property
+    def has_voice(self) -> bool:
+        """Whether Jobvis has both an ElevenLabs API key and an agent id."""
+        return bool(self.elevenlabs_api_key.get_secret_value() and self.elevenlabs_agent_id)
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
