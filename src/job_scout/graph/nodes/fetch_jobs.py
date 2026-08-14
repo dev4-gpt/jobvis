@@ -13,14 +13,15 @@ from job_scout.config import get_settings
 from job_scout.graph.schemas import JobPosting
 from job_scout.graph.state import AgentState
 from job_scout.llm import ensure_budget, get_chat_model
+from job_scout.tools.jobs_api import location_to_country, search_jobs
 from job_scout.tools.jobs_api import run_search_detailed as run_search
-from job_scout.tools.jobs_api import search_jobs
 
 # Per-fetch limit comes from settings (SCOUT_MAX_JOBS, default 10 — it drives
 # ranking latency directly: 10 jobs = 2 LLM batches ≈ half a minute end to end).
 # The merged ceiling bounds growth across reformulation loops, so a broadened
 # search can still ADD jobs beyond the per-fetch limit without ballooning.
 MERGED_CEILING = 25
+_US_SCOPE_VALUES = {"us", "usa", "united states", "anywhere in the united states"}
 
 _SYSTEM = (
     "You are a job search assistant. Call the search_jobs tool exactly once. "
@@ -66,17 +67,30 @@ def fetch_jobs(state: AgentState) -> dict:
     message = model.invoke([SystemMessage(_SYSTEM), HumanMessage(_build_prompt(state))])
     calls += 1
 
-    location = profile.locations[0] if profile.locations else None
+    explicit_location = profile.locations[0] if profile.locations else None
     if message.tool_calls:
         args = message.tool_calls[0]["args"]
         query = args.get("query") or " ".join(profile.primary_roles[:2])
-        country = args.get("country")
-        remote = bool(args.get("remote", profile.remote_ok))
+        model_country = args.get("country")
     else:
         errors.append("fetch_jobs: LLM issued no tool call; used profile-derived query")
         query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3])
-        country = None
-        remote = profile.remote_ok
+        model_country = None
+
+    # Human scope is authoritative. The model may formulate the query, but it
+    # cannot narrow a country-wide relocation choice, change the country, or
+    # turn off the user's remote preference.
+    normalized_locations = {loc.strip().lower() for loc in profile.locations}
+    if normalized_locations & _US_SCOPE_VALUES:
+        location = None
+        country = "us"
+    elif explicit_location:
+        location = explicit_location
+        country = location_to_country(explicit_location)
+    else:
+        location = None
+        country = model_country
+    remote = profile.remote_ok
 
     search = run_search(query=query, location=location, country=country, remote=remote, limit=settings.scout_max_jobs)
     if isinstance(search, tuple):  # compatibility with simple test doubles and older callers

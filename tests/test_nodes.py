@@ -39,6 +39,22 @@ def test_fetch_jobs_no_tool_call_fallback(monkeypatch, sample_profile, sample_jo
     assert out["jobs"] == sample_jobs
 
 
+def test_fetch_jobs_country_scope_overrides_model_location_and_remote(monkeypatch, sample_profile, sample_jobs):
+    llm = tool_calling_llm([{"name": "search_jobs", "args": {"query": "ml engineer", "country": "de", "remote": False}}])
+    monkeypatch.setattr(fetch_mod, "get_chat_model", lambda *a, **k: llm)
+    captured = {}
+
+    def fake_run_search(query, location, country, remote, limit):
+        captured.update(query=query, location=location, country=country, remote=remote)
+        return sample_jobs, ["cache"]
+
+    monkeypatch.setattr(fetch_mod, "run_search", fake_run_search)
+    profile = sample_profile.model_copy(update={"locations": ["Anywhere in the United States"], "remote_ok": True})
+    fetch_jobs({"profile": profile, "llm_calls": 0})
+
+    assert captured == {"query": "ml engineer", "location": None, "country": "us", "remote": True}
+
+
 def test_rank_jobs_batches_by_five(monkeypatch, sample_profile):
     jobs = [make_job(f"j{i}", f"Role {i}", f"Co{i}") for i in range(7)]
     calls = []

@@ -526,11 +526,22 @@ def _pack_downloads(result: TailorResult, profile: Profile | None) -> tuple[dict
 
 
 REMOTE_CHOICE = "Remote (anywhere)"
+US_SCOPE_CHOICE = "Anywhere in the United States"
+
+
+def _is_us_scope(location: str) -> bool:
+    """Whether a chooser value means the whole US, not a literal city."""
+    return location.strip().lower() in {"us", "usa", "united states", "anywhere in the united states"}
 
 
 def _selection_to_prefs(selection: list[str]) -> dict:
     """The chooser's ticked boxes as a preferences dict."""
-    return {"locations": [s for s in selection if s != REMOTE_CHOICE], "remote": REMOTE_CHOICE in selection}
+    us_scope = any(_is_us_scope(s) or s == US_SCOPE_CHOICE for s in selection)
+    locations = [s for s in selection if s != REMOTE_CHOICE and not _is_us_scope(s) and s != US_SCOPE_CHOICE]
+    preferences = {"locations": [] if us_scope else locations, "remote": REMOTE_CHOICE in selection}
+    if us_scope:
+        preferences["country_scope"] = "us"
+    return preferences
 
 
 def _apply_preferences(profile: Profile, preferences: dict | None) -> Profile:
@@ -541,9 +552,10 @@ def _apply_preferences(profile: Profile, preferences: dict | None) -> Profile:
     """
     if not preferences:
         return profile
-    return profile.model_copy(
-        update={"locations": list(preferences.get("locations") or []), "remote_ok": bool(preferences.get("remote"))}
-    )
+    locations = list(preferences.get("locations") or [])
+    if preferences.get("country_scope") == "us" or any(_is_us_scope(loc) for loc in locations):
+        locations = [US_SCOPE_CHOICE]
+    return profile.model_copy(update={"locations": locations, "remote_ok": bool(preferences.get("remote"))})
 
 
 def _preference_selection(profile: Profile, preferences: dict | None) -> tuple[list[str], list[str]]:
@@ -551,9 +563,11 @@ def _preference_selection(profile: Profile, preferences: dict | None) -> tuple[l
     if preferences:
         locations = [loc for loc in (preferences.get("locations") or []) if loc]
         remote = bool(preferences.get("remote"))
+        if preferences.get("country_scope") == "us" or any(_is_us_scope(loc) for loc in locations):
+            locations = [US_SCOPE_CHOICE]
     else:
         locations, remote = list(profile.locations), bool(profile.remote_ok)
-    choices = [*dict.fromkeys([*profile.locations, *locations]), REMOTE_CHOICE]
+    choices = [*dict.fromkeys([*profile.locations, *locations, US_SCOPE_CHOICE, REMOTE_CHOICE])]
     return choices, [*locations, *([REMOTE_CHOICE] if remote else [])]
 
 
@@ -776,7 +790,8 @@ def build_app() -> gr.Blocks:
             gr.HTML('<p class="js-section-label" style="margin-top:14px">Where should we search?</p>')
             gr.HTML(
                 '<p class="js-muted" style="font-size:0.86rem">The boxes come from your resume — a suggestion, '
-                "not a decision. Tick where you actually want to work; add anywhere we missed.</p>"
+                "not a decision. Tick cities, or choose <b>Anywhere in the United States</b> if you are open to "
+                "relocating to any US city; add anywhere we missed.</p>"
             )
             loc_group = gr.CheckboxGroup(label="", show_label=False, choices=[], value=[], interactive=True)
             with gr.Row():

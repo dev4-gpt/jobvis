@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/LangGraph-1.1+-ff6f00.svg" alt="LangGraph">
   <img src="https://img.shields.io/badge/Opik-observability-6f42c1.svg" alt="Opik">
   <img src="https://img.shields.io/badge/Gradio-5+-f97316.svg" alt="Gradio">
-  <img src="https://img.shields.io/badge/tests-146%20passing-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-148%20passing-brightgreen.svg" alt="Tests">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
 
@@ -44,7 +44,7 @@ git clone --branch part3.0 https://github.com/jamwithai/observable-job-agent
 cd observable-job-agent
 uv sync --all-groups --no-editable
 cp .env.example .env    # add one LLM key (see below)
-make test               # 146 passing, 1 expected renderer skip
+make test               # 148 passing, 1 expected renderer skip
 make app                # http://localhost:7860
 ```
 
@@ -121,7 +121,7 @@ observable-job-agent/
 ├── scripts/                # batches, dataset builders, eval suites, annotation queue
 ├── data/                   # cached_jobs.json, fixture_cvs/, fixture_linkedin/, labels/
 ├── docs/                   # architecture, learning guides, privacy, findings, reports
-└── tests/                  # 146 passing, 1 expected renderer skip
+└── tests/                  # 148 passing, 1 expected renderer skip
 ```
 
 ## 🔧 Commands

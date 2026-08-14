@@ -44,7 +44,10 @@ def test_stored_packs_stay_under_the_fabrication_gate(opik_client):
     from job_scout.graph.schemas import TailoringPack
     from job_scout.validation import validate_pack
 
-    items = opik_client.get_dataset("job-scout-tailoring-cases").get_items()
+    try:
+        items = opik_client.get_dataset("job-scout-tailoring-cases").get_items()
+    except Exception as exc:  # noqa: BLE001 - an optional remote dataset is not a CI failure
+        pytest.skip(f"optional Opik tailoring dataset unavailable: {type(exc).__name__}")
     flags = claims = 0
     for item in items:
         if not item.get("pack") or not item.get("cv_text"):

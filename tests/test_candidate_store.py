@@ -97,6 +97,24 @@ def test_on_find_searches_the_chosen_locations(tmp_store, sample_profile, monkey
     assert tmp_store.load_candidate().preferences == {"locations": ["Tokyo, Japan"], "remote": True}
 
 
+def test_us_scope_means_any_city_and_is_persisted_as_country_scope(tmp_store, sample_profile, monkeypatch):
+    from job_scout.runner import RunResult
+
+    seen = {}
+
+    def fake_stream(profile, **kwargs):
+        seen["profile"] = profile
+        yield ("result", RunResult())
+
+    monkeypatch.setattr(app_module, "stream_search", fake_stream)
+    selection = [app_module.US_SCOPE_CHOICE, app_module.REMOTE_CHOICE]
+    list(app_module.on_find("cv text", sample_profile, "t1", selection))
+
+    assert seen["profile"].locations == [app_module.US_SCOPE_CHOICE]
+    assert seen["profile"].remote_ok is True
+    assert tmp_store.load_candidate().preferences == {"locations": [], "remote": True, "country_scope": "us"}
+
+
 def test_on_add_location_ticks_and_persists(tmp_store, sample_profile):
     choices = ["Berlin, Germany", app_module.REMOTE_CHOICE]
     new_choices, group_update, cleared = app_module.on_add_location(
