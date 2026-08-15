@@ -299,6 +299,8 @@ def test_event_stream_repaints_after_a_click_path_run(bridge, monkeypatch, sampl
 def test_pack_downloads_404_before_tailoring(client):
     assert client.get("/api/pack/pdf").status_code == 404
     assert client.get("/api/pack/tex").status_code == 404
+    assert client.get("/api/pack/cover-letter/pdf").status_code == 404
+    assert client.get("/api/pack/cover-letter/tex").status_code == 404
 
 
 async def _never_disconnected() -> bool:

@@ -11,9 +11,11 @@ a human-readable pointer ("open it in Overleaf") instead of a PDF path.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from html import unescape
 from pathlib import Path
 
 from jinja2 import Environment, PackageLoader
@@ -82,21 +84,30 @@ def render_tex(cv: CVContent, candidate_name: str) -> str:
     return template.render(cv=cv, name=candidate_name)
 
 
+def normalize_cover_letter(text: str) -> str:
+    """Convert common LLM HTML formatting into plain text for LaTeX."""
+    text = re.sub(r"(?is)<br\s*/?>", "\n", str(text))
+    text = re.sub(r"(?is)</(?:p|div|li|h[1-6])\s*>", "\n", text)
+    text = re.sub(r"(?is)<[^>]+>", "", text)
+    return unescape(text).strip()
+
+
+def render_cover_letter_tex(cover_letter: str, candidate_name: str) -> str:
+    """Render a cover letter as a standalone, LaTeX-safe document."""
+    template = _environment().get_template("cover_letter.tex.j2")
+    return template.render(letter=normalize_cover_letter(cover_letter), name=candidate_name)
+
+
 def tectonic_path() -> str | None:
     """Absolute path of the tectonic binary, or ``None`` when not installed."""
     return shutil.which("tectonic")
 
 
-def render_pdf(cv: CVContent, candidate_name: str, out_dir: Path) -> RenderResult:
-    """Write the ``.tex`` and compile it to PDF when tectonic is available.
-
-    ``out_dir`` should be a temp/scratch directory chosen by the caller — never
-    inside the repo. Never raises: every failure mode returns a ``RenderResult``
-    with ``pdf_path=None`` and an actionable ``message``.
-    """
+def _compile_tex(tex: str, filename: str, out_dir: Path) -> RenderResult:
+    """Write one LaTeX document and compile it when Tectonic is available."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    tex_path = out_dir / "tailored_cv.tex"
-    tex_path.write_text(render_tex(cv, candidate_name), encoding="utf-8")
+    tex_path = out_dir / filename
+    tex_path.write_text(tex, encoding="utf-8")
 
     binary = tectonic_path()
     if binary is None:
@@ -117,3 +128,18 @@ def render_pdf(cv: CVContent, candidate_name: str, out_dir: Path) -> RenderResul
         tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
         return RenderResult(tex_path=tex_path, message="tectonic compile failed: " + " / ".join(tail))
     return RenderResult(tex_path=tex_path, pdf_path=pdf_path)
+
+
+def render_pdf(cv: CVContent, candidate_name: str, out_dir: Path) -> RenderResult:
+    """Write the ``.tex`` and compile it to PDF when tectonic is available.
+
+    ``out_dir`` should be a temp/scratch directory chosen by the caller — never
+    inside the repo. Never raises: every failure mode returns a ``RenderResult``
+    with ``pdf_path=None`` and an actionable ``message``.
+    """
+    return _compile_tex(render_tex(cv, candidate_name), "tailored_cv.tex", out_dir)
+
+
+def render_cover_letter_pdf(cover_letter: str, candidate_name: str, out_dir: Path) -> RenderResult:
+    """Write and compile a standalone cover-letter PDF when possible."""
+    return _compile_tex(render_cover_letter_tex(cover_letter, candidate_name), "cover_letter.tex", out_dir)

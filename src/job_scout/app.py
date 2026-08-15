@@ -17,8 +17,9 @@ whispers a screen event to whoever is listening on the console.
 
 from __future__ import annotations
 
+import re
 import tempfile
-from html import escape
+from html import escape, unescape
 from pathlib import Path
 from uuid import uuid4
 
@@ -27,7 +28,7 @@ import gradio as gr
 from job_scout import candidate_store
 from job_scout.graph.schemas import Profile, RankedJob
 from job_scout.profile import extract_profile
-from job_scout.renderer import render_pdf
+from job_scout.renderer import render_cover_letter_pdf, render_pdf
 from job_scout.runner import RunResult, TailorResult, stream_search, stream_tailor
 from job_scout.tools.cv_reader import CVReadError, extract_cv_text
 from job_scout.tracing import opik_url, register_prompts
@@ -493,11 +494,15 @@ def _pack_html(result: TailorResult) -> str:
     honesty = ""
     if pack.honesty_note:
         honesty = f'<div class="js-honesty"><b>Honesty note</b> — {escape(pack.honesty_note)}</div>'
+    letter = re.sub(r"(?is)<br\s*/?>", "\n", pack.cover_letter)
+    letter = re.sub(r"(?is)</(?:p|div|li|h[1-6])\s*>", "\n", letter)
+    letter = re.sub(r"(?is)<[^>]+>", "", letter)
+    letter_html = escape(unescape(letter)).replace("\n", "<br>")
     return (
         '<div class="js-pack">'
         f"{_fabrication_html(result)}"
         '<p class="js-section-label">Cover letter</p>'
-        f'<div class="js-card js-letter">{escape(pack.cover_letter)}</div>'
+        f'<div class="js-card js-letter">{letter_html}</div>'
         '<p class="js-section-label">Tailored CV</p>'
         f"{_cv_preview_html(pack)}"
         f"{honesty}"
@@ -527,20 +532,29 @@ def _status(text: str, error: bool = False) -> str:
     return f'<div class="{cls}">{escape(text)}</div>'
 
 
-def _pack_downloads(result: TailorResult, profile: Profile | None) -> tuple[dict, dict, str]:
+def _pack_downloads(result: TailorResult, profile: Profile | None) -> tuple[dict, dict, dict, dict, str]:
     """Footer + download-button updates for a finished tailoring run (click or voice)."""
     hidden = gr.update(visible=False)
     footer = _tailor_footer_html(result)
-    pdf_btn, tex_btn = hidden, hidden
+    pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn = hidden, hidden, hidden, hidden
     if result.pack is not None:
         name = (profile.name if profile else None) or "Candidate"
-        render = render_pdf(result.pack.cv, name, Path(tempfile.mkdtemp(prefix="job_scout_render_")))
-        tex_btn = gr.update(value=str(render.tex_path), visible=True)
-        if render.pdf_path is not None:
-            pdf_btn = gr.update(value=str(render.pdf_path), visible=True)
-        elif render.message:
-            footer = f'<div class="js-footer">{escape(render.message)}</div>{footer}'
-    return pdf_btn, tex_btn, footer
+        out_dir = Path(tempfile.mkdtemp(prefix="job_scout_render_"))
+        cv_render = render_pdf(result.pack.cv, name, out_dir)
+        letter_render = render_cover_letter_pdf(result.pack.cover_letter, name, out_dir)
+        tex_btn = gr.update(value=str(cv_render.tex_path), visible=True)
+        letter_tex_btn = gr.update(value=str(letter_render.tex_path), visible=True)
+        if cv_render.pdf_path is not None:
+            pdf_btn = gr.update(value=str(cv_render.pdf_path), visible=True)
+        if letter_render.pdf_path is not None:
+            letter_pdf_btn = gr.update(value=str(letter_render.pdf_path), visible=True)
+        messages = list(dict.fromkeys(message for message in (cv_render.message, letter_render.message) if message))
+        if messages:
+            guidance = "PDF downloads are unavailable until Tectonic is installed. "
+            guidance += "Run `brew install tectonic`, restart Job Scout, and tailor again. "
+            guidance += "The .tex files are still available for Overleaf."
+            footer = f'<div class="js-footer">{escape(guidance)}</div>{footer}'
+    return pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn, footer
 
 
 def _voice_context(text: str) -> None:
@@ -567,7 +581,7 @@ def on_run_tick():
             loading = _loading_html(str(progress.get("latest_status") or "working…"))
             if progress.get("kind") == "search":
                 show_results = (gr.update(visible=False), gr.update(visible=True), gr.update(visible=False))
-                return (*show_results, loading, "", no, no, no, no, no)
+                return (*show_results, loading, "", no, no, no, no, no, no, no)
             return (
                 gr.update(visible=False),
                 gr.update(visible=False),
@@ -577,6 +591,8 @@ def on_run_tick():
                 no,
                 loading,
                 "",
+                gr.update(visible=False),
+                gr.update(visible=False),
                 gr.update(visible=False),
                 gr.update(visible=False),
             )
@@ -594,10 +610,12 @@ def on_run_tick():
             no,
             no,
             no,
+            no,
+            no,
         )
     if run is not None and run.kind == "tailor" and run.tailor_result is not None and not run.failed:
         result = run.tailor_result
-        pdf_btn, tex_btn, footer = _pack_downloads(result, bridge.snapshot().profile)
+        pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn, footer = _pack_downloads(result, bridge.snapshot().profile)
         return (
             gr.update(visible=False),
             gr.update(visible=False),
@@ -609,8 +627,10 @@ def on_run_tick():
             footer,
             pdf_btn,
             tex_btn,
+            letter_pdf_btn,
+            letter_tex_btn,
         )
-    return (no,) * 10
+    return (no,) * 12
 
 
 REMOTE_CHOICE = "Remote (anywhere)"
@@ -795,17 +815,18 @@ def on_tailor(selected_job_id: str | None, thread_id: str, linkedin_zip: str | N
 
     Only ``selected_job_id`` (+ optional LinkedIn export path) is passed to the
     graph — profile, ranked jobs and CV text come from the thread's checkpoint.
-    Outputs: (page_results, page_tailor, tailor_html, tailor_footer, pdf_btn, tex_btn).
+    Outputs: (page_results, page_tailor, tailor_html, tailor_footer, cv_pdf_btn,
+    cv_tex_btn, cover_letter_pdf_btn, cover_letter_tex_btn).
     """
     stay = gr.update(visible=True), gr.update(visible=False)
     go = gr.update(visible=False), gr.update(visible=True)
     hidden = gr.update(visible=False)
     if not selected_job_id:
         gr.Warning("Pick a job from the dropdown first.")
-        yield (*stay, gr.update(), gr.update(), hidden, hidden)
+        yield (*stay, gr.update(), gr.update(), hidden, hidden, hidden, hidden)
         return
 
-    yield (*go, _loading_html("Drafting the application…"), "", hidden, hidden)
+    yield (*go, _loading_html("Drafting the application…"), "", hidden, hidden, hidden, hidden)
     result = TailorResult()
     stream = stream_tailor(
         thread_id=thread_id,
@@ -815,14 +836,14 @@ def on_tailor(selected_job_id: str | None, thread_id: str, linkedin_zip: str | N
     )
     for kind, payload in stream:
         if kind == "status":
-            yield (*go, _loading_html(str(payload)), "", hidden, hidden)
+            yield (*go, _loading_html(str(payload)), "", hidden, hidden, hidden, hidden)
         elif kind == "result":
             result = payload  # type: ignore[assignment]
 
-    pdf_btn, tex_btn, footer = _pack_downloads(result, profile)
+    pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn, footer = _pack_downloads(result, profile)
     voice_bridge.get_bridge().record_step("tailor")
     _voice_context("Screen event: an application pack was just tailored via the on-screen button and is now visible.")
-    yield (*go, _pack_html(result), footer, pdf_btn, tex_btn)
+    yield (*go, _pack_html(result), footer, pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn)
 
 
 def reset():
@@ -836,6 +857,7 @@ def reset():
     Outputs: (page_start, page_profile, page_results, page_tailor, cv_file,
     cv_text_state, start_status, results_html, footer_html, thread_id,
     linkedin_zip_state, job_select, tailor_out, tailor_footer, pdf_btn, tex_btn,
+    cover_letter_pdf_btn, cover_letter_tex_btn,
     loc_choices_state, loc_group).
     """
     new_thread_id = str(uuid4())
@@ -856,6 +878,8 @@ def reset():
         gr.update(choices=[], value=None),
         "",
         "",
+        gr.update(visible=False),
+        gr.update(visible=False),
         gr.update(visible=False),
         gr.update(visible=False),
         [],
@@ -930,10 +954,20 @@ def build_app() -> gr.Blocks:
         with gr.Group(visible=False, elem_classes=["js-page"]) as page_tailor:
             gr.HTML(_stepper(4))
             gr.HTML('<p class="js-section-label">Application pack</p>')
+            gr.HTML(
+                '<div class="js-honesty"><b>Review before sending</b> — this is a draft, not an application submission. '
+                "Read the warning list, cover letter, and honesty note; correct anything you cannot support, then "
+                "submit it yourself on the employer's site.</div>"
+            )
             tailor_out = gr.HTML()
             with gr.Row():
                 pdf_btn = gr.DownloadButton("Download tailored CV (PDF)", visible=False, variant="primary")
-                tex_btn = gr.DownloadButton("Download .tex", visible=False, variant="secondary")
+                tex_btn = gr.DownloadButton("Download tailored CV (.tex)", visible=False, variant="secondary")
+            with gr.Row():
+                cover_letter_pdf_btn = gr.DownloadButton("Download cover letter (PDF)", visible=False, variant="primary")
+                cover_letter_tex_btn = gr.DownloadButton(
+                    "Download cover letter (.tex)", visible=False, variant="secondary"
+                )
             tailor_footer = gr.HTML()
             back_btn = gr.Button("Back to jobs", variant="secondary")
             restart_btn2 = gr.Button("Start over", variant="secondary")
@@ -973,7 +1007,16 @@ def build_app() -> gr.Blocks:
         tailor_btn.click(
             on_tailor,
             inputs=[job_select, thread_id, linkedin_zip_state, profile_state],
-            outputs=[page_results, page_tailor, tailor_out, tailor_footer, pdf_btn, tex_btn],
+            outputs=[
+                page_results,
+                page_tailor,
+                tailor_out,
+                tailor_footer,
+                pdf_btn,
+                tex_btn,
+                cover_letter_pdf_btn,
+                cover_letter_tex_btn,
+            ],
         )
         back_btn.click(
             lambda: (gr.update(visible=True), gr.update(visible=False)),
@@ -996,6 +1039,8 @@ def build_app() -> gr.Blocks:
             tailor_footer,
             pdf_btn,
             tex_btn,
+            cover_letter_pdf_btn,
+            cover_letter_tex_btn,
             loc_choices_state,
             loc_group,
         ]
@@ -1021,6 +1066,8 @@ def build_app() -> gr.Blocks:
                     tailor_footer,
                     pdf_btn,
                     tex_btn,
+                    cover_letter_pdf_btn,
+                    cover_letter_tex_btn,
                 ],
             )
         # Restore on page load. A load event, not a Timer: the client only opens

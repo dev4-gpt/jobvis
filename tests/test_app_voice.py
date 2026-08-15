@@ -53,7 +53,7 @@ def test_tick_pops_a_finished_tailor_run_onto_the_page(monkeypatch, sample_profi
     run_and_finish(bridge, monkeypatch, "tailor", TailorResult())  # pack=None → error card, still pops
 
     outputs = app_module.on_run_tick()
-    assert len(outputs) == 10
+    assert len(outputs) == 12
     page_profile, page_results, page_tailor = outputs[0], outputs[1], outputs[2]
     assert page_tailor["visible"] is True
     assert page_profile["visible"] is False and page_results["visible"] is False

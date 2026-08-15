@@ -11,8 +11,9 @@ The ElevenLabs key never leaves this process. The browser asks for a
 short-lived conversation token, and that is the only credential it ever holds.
 
 Routes, all under ``/api``: ``config`` (what the console may assume),
-``voice/token``, ``tools/{name}``, ``state``, ``events`` (SSE), and the two
-pack downloads. Everything else is the built console, served from ``web/out``.
+``voice/token``, ``tools/{name}``, ``state``, ``events`` (SSE), and the four
+pack downloads (CV and cover letter as PDF or LaTeX). Everything else is the
+built console, served from ``web/out``.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ from fastapi.staticfiles import StaticFiles
 from job_scout import candidate_store
 from job_scout.config import get_settings
 from job_scout.graph.schemas import Profile, RankedJob, TailoringPack
-from job_scout.renderer import render_pdf
+from job_scout.renderer import render_cover_letter_pdf, render_pdf
 from job_scout.voice import bridge as voice_bridge
 from job_scout.voice import is_voice_available
 from job_scout.voice.announce import run_announcement
@@ -136,25 +137,38 @@ def current_state() -> dict:
     }
 
 
-# One render per pack, keyed by cover letter, so repeated download clicks (and
-# the tex/pdf pair) do not recompile the same LaTeX twice.
-_RENDER_CACHE: dict = {"key": None, "pdf": None, "tex": None}
+# One render per pack, keyed by its contents, so repeated download clicks do
+# not recompile the same LaTeX twice.
+_RENDER_CACHE: dict = {"key": None, "cv_pdf": None, "cv_tex": None, "letter_pdf": None, "letter_tex": None}
 
 
-def _render_paths() -> tuple[Path | None, Path | None]:
+def _render_paths() -> tuple[Path | None, Path | None, Path | None, Path | None]:
     ensure_session()
     bridge = voice_bridge.get_bridge()
     snap = bridge.snapshot()
     values = voice_bridge.checkpoint_values(snap.thread_id)
     pack: TailoringPack | None = values.get("tailoring")
     if pack is None:
-        return None, None
-    key = hash(pack.cover_letter)
+        return None, None, None, None
+    key = hash((pack.cover_letter, pack.cv.model_dump_json()))
     if _RENDER_CACHE["key"] != key:
         name = (snap.profile.name if snap.profile else None) or "Candidate"
-        result = render_pdf(pack.cv, name, Path(tempfile.mkdtemp(prefix="job_scout_render_")))
-        _RENDER_CACHE.update(key=key, pdf=result.pdf_path, tex=result.tex_path)
-    return _RENDER_CACHE["pdf"], _RENDER_CACHE["tex"]
+        out_dir = Path(tempfile.mkdtemp(prefix="job_scout_render_"))
+        cv_result = render_pdf(pack.cv, name, out_dir)
+        letter_result = render_cover_letter_pdf(pack.cover_letter, name, out_dir)
+        _RENDER_CACHE.update(
+            key=key,
+            cv_pdf=cv_result.pdf_path,
+            cv_tex=cv_result.tex_path,
+            letter_pdf=letter_result.pdf_path,
+            letter_tex=letter_result.tex_path,
+        )
+    return (
+        _RENDER_CACHE["cv_pdf"],
+        _RENDER_CACHE["cv_tex"],
+        _RENDER_CACHE["letter_pdf"],
+        _RENDER_CACHE["letter_tex"],
+    )
 
 
 def _jsonable(value: Any, path: str = "") -> Any:
@@ -341,17 +355,31 @@ def create_app() -> FastAPI:
 
     @app.get("/api/pack/pdf")
     def pack_pdf() -> FileResponse:
-        pdf, _ = _render_paths()
+        pdf, _, _, _ = _render_paths()
         if pdf is None:
             raise HTTPException(status_code=404, detail="no tailored CV yet (tectonic missing? try the .tex)")
         return FileResponse(pdf, filename="tailored_cv.pdf", media_type="application/pdf")
 
     @app.get("/api/pack/tex")
     def pack_tex() -> FileResponse:
-        _, tex = _render_paths()
+        _, tex, _, _ = _render_paths()
         if tex is None:
             raise HTTPException(status_code=404, detail="no tailored CV yet")
         return FileResponse(tex, filename="tailored_cv.tex", media_type="application/x-tex")
+
+    @app.get("/api/pack/cover-letter/pdf")
+    def cover_letter_pdf() -> FileResponse:
+        _, _, pdf, _ = _render_paths()
+        if pdf is None:
+            raise HTTPException(status_code=404, detail="no cover-letter PDF yet (tectonic missing? try the .tex)")
+        return FileResponse(pdf, filename="cover_letter.pdf", media_type="application/pdf")
+
+    @app.get("/api/pack/cover-letter/tex")
+    def cover_letter_tex() -> FileResponse:
+        _, _, _, tex = _render_paths()
+        if tex is None:
+            raise HTTPException(status_code=404, detail="no tailored cover letter yet")
+        return FileResponse(tex, filename="cover_letter.tex", media_type="application/x-tex")
 
     console = web_dir()
     if (console / "index.html").exists():

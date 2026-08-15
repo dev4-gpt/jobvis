@@ -1055,6 +1055,7 @@ name = "job-scout"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastapi" },
     { name = "fpdf2" },
     { name = "gradio" },
     { name = "httpx" },
@@ -1068,6 +1069,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pypdf" },
     { name = "pyyaml" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -1094,6 +1096,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
     { name = "fpdf2", specifier = ">=2.8" },
     { name = "gradio", specifier = ">=5" },
     { name = "httpx", specifier = ">=0.27" },
@@ -1110,6 +1113,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "pypdf", specifier = ">=5" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "uvicorn", specifier = ">=0.30" },
 ]
 
 [package.metadata.requires-dev]

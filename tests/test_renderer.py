@@ -7,7 +7,15 @@ import shutil
 import pytest
 
 from job_scout.graph.schemas import CVContent, ExperienceEntry, TailoredBullet
-from job_scout.renderer import OVERLEAF_HINT, latex_escape, render_pdf, render_tex
+from job_scout.renderer import (
+    OVERLEAF_HINT,
+    latex_escape,
+    normalize_cover_letter,
+    render_cover_letter_pdf,
+    render_cover_letter_tex,
+    render_pdf,
+    render_tex,
+)
 
 _HAS_TECTONIC = shutil.which("tectonic") is not None
 
@@ -71,6 +79,15 @@ def test_render_tex_is_a_complete_document():
     assert r"\begin{itemize}" in tex
 
 
+def test_render_cover_letter_normalizes_html_and_escapes_latex():
+    letter = "Dear team,<br><br>I built 100% reliable APIs & data tools.<br>Best, Jane"
+    assert normalize_cover_letter(letter) == "Dear team,\n\nI built 100% reliable APIs & data tools.\nBest, Jane"
+    tex = render_cover_letter_tex(letter, "Jane & Co")
+    assert r"Jane \& Co" in tex
+    assert r"100\% reliable APIs \& data tools." in tex
+    assert "<br>" not in tex
+
+
 def test_render_tex_handles_empty_sections():
     cv = CVContent(headline="X", summary="Y")
     tex = render_tex(cv, candidate_name="Jane")
@@ -84,6 +101,17 @@ def test_render_pdf_degrades_without_tectonic(tmp_path, monkeypatch):
 
     monkeypatch.setattr(renderer_mod, "tectonic_path", lambda: None)
     result = render_pdf(_cv(), "Jane", tmp_path)
+    assert result.tex_path.exists()
+    assert result.pdf_path is None
+    assert result.message == OVERLEAF_HINT
+
+
+def test_render_cover_letter_pdf_degrades_without_tectonic(tmp_path, monkeypatch):
+    import job_scout.renderer as renderer_mod
+
+    monkeypatch.setattr(renderer_mod, "tectonic_path", lambda: None)
+    result = render_cover_letter_pdf("Dear team,<br>Best, Jane", "Jane", tmp_path)
+    assert result.tex_path.name == "cover_letter.tex"
     assert result.tex_path.exists()
     assert result.pdf_path is None
     assert result.message == OVERLEAF_HINT
