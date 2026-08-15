@@ -927,7 +927,17 @@ def build_app() -> gr.Blocks:
                 "not a decision. Tick cities, or choose <b>Anywhere in the United States</b> if you are open to "
                 "relocating to any US city; add anywhere we missed.</p>"
             )
-            loc_group = gr.CheckboxGroup(label="", show_label=False, choices=[], value=[], interactive=True)
+            # Keep the two global choices present even before profile extraction
+            # finishes. This prevents Gradio from rejecting a fast click on
+            # "Anywhere in the United States" while the dynamic city choices
+            # are still being sent to the browser.
+            loc_group = gr.CheckboxGroup(
+                label="",
+                show_label=False,
+                choices=[US_SCOPE_CHOICE, REMOTE_CHOICE],
+                value=[],
+                interactive=True,
+            )
             with gr.Row():
                 loc_new = gr.Textbox(label="", show_label=False, placeholder="Add another location…", scale=4)
                 loc_add = gr.Button("Add", size="sm", scale=0)

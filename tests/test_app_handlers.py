@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 import job_scout.app as app_mod
 from job_scout.app import on_find, on_tailor, on_zip, reset
 from job_scout.graph.schemas import CVContent, RankedJob, TailoringPack
+from job_scout.renderer import RenderResult
 from job_scout.runner import RunResult, TailorResult
 from tests.conftest import make_job
 
@@ -29,12 +32,32 @@ def _fake_stream(result):
     return stream
 
 
+@pytest.fixture(autouse=True)
+def no_latex_compilation(monkeypatch):
+    """Keep handler tests deterministic even when Tectonic is installed."""
+    monkeypatch.setattr(
+        app_mod,
+        "render_pdf",
+        lambda cv, name, out_dir: RenderResult(tex_path=out_dir / "tailored_cv.tex"),
+    )
+    monkeypatch.setattr(
+        app_mod,
+        "render_cover_letter_pdf",
+        lambda letter, name, out_dir: RenderResult(tex_path=out_dir / "cover_letter.tex"),
+    )
+
+
 def test_on_find_populates_job_dropdown(monkeypatch, sample_profile):
     monkeypatch.setattr(app_mod, "stream_search", _fake_stream(_search_result()))
     final = list(on_find("cv text", sample_profile, "t1", []))[-1]
     select = final[4]
     assert select["choices"] == [("Data Scientist — Acme (fit 88)", "j1")]
     assert select["visible"] is True
+
+
+def test_location_chooser_always_includes_us_scope(sample_profile):
+    choices, _ = app_mod._preference_selection(sample_profile, None)
+    assert app_mod.US_SCOPE_CHOICE in choices
 
 
 def test_on_tailor_renders_pack_and_honesty_note(monkeypatch, sample_profile):
