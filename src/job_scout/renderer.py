@@ -60,6 +60,13 @@ def latex_escape(text: str) -> str:
     return text.replace("\x00", r"\textbackslash{}")
 
 
+def latex_url(text: str) -> str:
+    """Escape a URL for hyperref's URL argument."""
+    # URLs must not turn `#`, `%`, or `_` into TeX syntax. Backslashes are not
+    # valid in a resume URL and are escaped defensively for malformed input.
+    return latex_escape(text).replace(r"\textbackslash{}", r"\textbackslash{}")
+
+
 def _environment() -> Environment:
     """Jinja2 env with LaTeX-safe delimiters (``<< >>`` / ``<% %>``)."""
     env = Environment(
@@ -75,6 +82,7 @@ def _environment() -> Environment:
         lstrip_blocks=True,
     )
     env.filters["tex"] = latex_escape
+    env.filters["urltex"] = latex_url
     return env
 
 

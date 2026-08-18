@@ -109,6 +109,15 @@ class ExperienceEntry(BaseModel):
     bullets: list[TailoredBullet] = Field(default_factory=list)
 
 
+class CVLink(BaseModel):
+    """A clickable link recovered from the source resume PDF."""
+
+    label: str
+    url: str
+    page: int = Field(ge=1)
+    source: str = "pdf_annotation"
+
+
 class CVContent(BaseModel):
     """The tailored CV: selected and reworded content, never invented."""
 
@@ -117,20 +126,32 @@ class CVContent(BaseModel):
     experience: list[ExperienceEntry] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     education: list[str] = Field(default_factory=list)
+    links: list[CVLink] = Field(default_factory=list)
 
 
 class TailoringPack(BaseModel):
     """Application material generated for a selected job (Phase 2).
 
-    The cover letter should stay under 350 words and reference at least two
+    The cover letter should be 250–350 words and reference at least two
     specific job requirements; the honesty note names real gaps the candidate
-    should not paper over. Both are prompt contracts, enforced by evaluation
-    rather than validation.
+    should not paper over. The deterministic quality report is stored beside
+    the pack, while fabrication validation remains a separate zero-LLM gate.
     """
 
     cv: CVContent
     cover_letter: str
     honesty_note: str = ""
+
+
+class CoverLetterQualityReport(BaseModel):
+    """Deterministic quality gate for a generated cover letter."""
+
+    word_count: int = 0
+    evidence_matches: int = 0
+    requirement_matches: int = 0
+    generic_phrases: list[str] = Field(default_factory=list)
+    passed: bool = False
+    reasons: list[str] = Field(default_factory=list)
 
 
 ClaimClassification = Literal["near_miss", "unsupported"]

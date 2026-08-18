@@ -26,11 +26,11 @@ from uuid import uuid4
 import gradio as gr
 
 from job_scout import candidate_store
-from job_scout.graph.schemas import Profile, RankedJob
+from job_scout.graph.schemas import CVLink, Profile, RankedJob
 from job_scout.profile import extract_profile
 from job_scout.renderer import render_cover_letter_pdf, render_pdf
 from job_scout.runner import RunResult, TailorResult, stream_search, stream_tailor
-from job_scout.tools.cv_reader import CVReadError, extract_cv_text
+from job_scout.tools.cv_reader import CVReadError
 from job_scout.tracing import opik_url, register_prompts
 from job_scout.voice import bridge as voice_bridge
 from job_scout.voice import is_voice_available
@@ -339,13 +339,27 @@ def _chips(items: list[str], kind: str, limit: int) -> str:
     return f'<div class="js-chips">{shown}</div>' if shown else ""
 
 
-def _profile_html(profile: Profile | None) -> str:
+def _profile_html(profile: Profile | None, cv_links: list[CVLink] | None = None) -> str:
     """Render the extracted profile as a card."""
     if profile is None:
         return '<div class="js-card js-muted">Could not read a profile from that resume.</div>'
     skills = "".join(f'<span class="js-pill">{escape(s)}</span>' for s in profile.skills) or "—"
     years = f"{profile.years_experience:g}" if profile.years_experience else "—"
     languages = escape(", ".join(profile.languages) or "—")
+    links = list(cv_links or [])
+    links_html = ""
+    if links:
+        rows = "".join(
+            f'<li><a href="{escape(link.url)}" target="_blank" rel="noopener">{escape(link.label)}</a>'
+            f' <span class="js-muted">page {link.page}</span></li>'
+            for link in links
+        )
+        links_html = (
+            '<div style="margin-top:14px"><b>Detected resume links</b>'
+            '<p class="js-muted" style="margin:4px 0 6px;font-size:0.82rem">'
+            "These are preserved in the generated CV. Check the labels before tailoring.</p>"
+            f"<ul>{rows}</ul></div>"
+        )
     return (
         '<div class="js-card">'
         f'<p class="js-profile-name">{escape(profile.name or "Candidate")}</p>'
@@ -359,7 +373,7 @@ def _profile_html(profile: Profile | None) -> str:
         "</div>"
         f'<p class="js-profile-row"><b>Locations</b> &nbsp;{escape(", ".join(profile.locations) or "—")}</p>'
         f'<p class="js-profile-row"><b>Languages</b> &nbsp;{languages}</p>'
-        f'<div style="margin-top:12px">{skills}</div>'
+        f'<div style="margin-top:12px">{skills}</div>{links_html}'
         "</div>"
     )
 
@@ -458,6 +472,11 @@ def _cv_preview_html(pack) -> str:
     if cv.education:
         rows = "".join(f"<li>{escape(line)}</li>" for line in cv.education)
         parts.append(f"<ul>{rows}</ul>")
+    if cv.links:
+        links = " · ".join(
+            f'<a href="{escape(link.url)}" target="_blank" rel="noopener">{escape(link.label)}</a>' for link in cv.links
+        )
+        parts.append(f'<p class="js-muted"><b>Preserved links:</b> {links}</p>')
     return f'<div class="js-card js-cvprev">{"".join(parts)}</div>'
 
 
@@ -491,6 +510,14 @@ def _pack_html(result: TailorResult) -> str:
         why = escape("; ".join(result.errors) or result.error_message or "unknown error")
         return f'<div class="js-empty"><div class="js-empty-icon">⚠</div><div>Could not tailor this job: {why}</div></div>'
     pack = result.pack
+    quality = result.cover_letter_quality
+    quality_html = ""
+    if quality is not None and not quality.passed:
+        quality_html = (
+            '<div class="js-fab-warn"><b>⚠ Cover-letter quality gate needs review.</b>'
+            f" The draft has {quality.word_count} words, {quality.evidence_matches} evidence points, and "
+            f"{quality.requirement_matches} matched requirements. {escape('; '.join(quality.reasons))}</div>"
+        )
     honesty = ""
     if pack.honesty_note:
         honesty = f'<div class="js-honesty"><b>Honesty note</b> — {escape(pack.honesty_note)}</div>'
@@ -501,6 +528,7 @@ def _pack_html(result: TailorResult) -> str:
     return (
         '<div class="js-pack">'
         f"{_fabrication_html(result)}"
+        f"{quality_html}"
         '<p class="js-section-label">Cover letter</p>'
         f'<div class="js-card js-letter">{letter_html}</div>'
         '<p class="js-section-label">Tailored CV</p>'
@@ -684,8 +712,10 @@ def on_prefs_change(selection: list[str], profile: Profile | None, cv_text: str,
     if profile is None:
         return
     prefs = _selection_to_prefs(selection)
-    voice_bridge.get_bridge().record_profile(candidate_store.effective_profile(profile, prefs), cv_text, thread_id)
-    candidate_store.save_candidate(profile, cv_text, prefs)
+    stored = candidate_store.load_candidate()
+    links = stored.cv_links if stored else []
+    voice_bridge.get_bridge().record_profile(candidate_store.effective_profile(profile, prefs), cv_text, thread_id, links)
+    candidate_store.save_candidate(profile, cv_text, prefs, links)
 
 
 def on_add_location(new_location: str, choices: list[str], selection: list[str], profile, cv_text, thread_id):
@@ -702,6 +732,23 @@ def on_add_location(new_location: str, choices: list[str], selection: list[str],
     return choices, gr.update(choices=choices, value=selection), ""
 
 
+def on_links_change(value, profile: Profile | None, cv_text: str, thread_id: str):
+    """Persist human-edited labels while keeping URLs and page metadata typed."""
+    if profile is None:
+        return gr.update()
+    try:
+        links = [CVLink.model_validate(item) for item in (value or []) if isinstance(item, dict)]
+    except Exception as exc:  # noqa: BLE001 - surface malformed editor data without changing state
+        gr.Warning(f"Could not save link edits: {exc}")
+        return gr.update()
+    stored = candidate_store.load_candidate()
+    preferences = stored.preferences if stored else None
+    effective = candidate_store.effective_profile(profile, preferences)
+    voice_bridge.get_bridge().record_profile(effective, cv_text, thread_id, links)
+    candidate_store.save_candidate(profile, cv_text, preferences, links)
+    return [link.model_dump() for link in links]
+
+
 def _on_load(thread_id: str):
     """Register the wizard thread with the voice bridge and restore a saved candidate.
 
@@ -710,15 +757,15 @@ def _on_load(thread_id: str):
     (the extraction was paid for when the CV was first uploaded). Jobs are NOT
     restored: results go stale, so every session fetches fresh.
     Outputs: (page_start, page_profile, profile_html, cv_text_state,
-    profile_state, loc_choices_state, loc_group).
+    profile_state, loc_choices_state, loc_group, links_editor).
     """
     voice_bridge.get_bridge().register_thread(thread_id)
     stored = candidate_store.load_candidate()
     if stored is None:
-        return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
+        return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
     choices, selected = _preference_selection(stored.profile, stored.preferences)
     effective = candidate_store.effective_profile(stored.profile, stored.preferences)
-    voice_bridge.get_bridge().record_profile(effective, stored.cv_text, thread_id)
+    voice_bridge.get_bridge().record_profile(effective, stored.cv_text, thread_id, stored.cv_links)
     note = (
         '<p class="js-muted" style="text-align:center;font-size:0.8rem;margin-top:10px">'
         "Restored from your last session — “Start over” forgets it.</p>"
@@ -726,11 +773,12 @@ def _on_load(thread_id: str):
     return (
         gr.update(visible=False),
         gr.update(visible=True),
-        _profile_html(stored.profile) + note,
+        _profile_html(stored.profile, stored.cv_links) + note,
         stored.cv_text,
         stored.profile,
         choices,
         gr.update(choices=choices, value=selected),
+        gr.update(value=[link.model_dump() for link in stored.cv_links]),
     )
 
 
@@ -740,35 +788,46 @@ def on_upload(file_path: str | None, thread_id: str):
     The chooser is seeded with the extraction's locations/remote as a ticked
     SUGGESTION — the human confirms or edits before any search runs.
     Outputs: (page_start, page_profile, profile_html, cv_text_state,
-    start_status, profile_state, loc_choices_state, loc_group).
+    start_status, profile_state, loc_choices_state, loc_group, links_editor).
     """
     stay = gr.update(visible=True), gr.update(visible=False)
     go = gr.update(visible=False), gr.update(visible=True)
     no = gr.update()
 
     if not file_path:
-        yield (*stay, gr.update(), "", _status("Please drop a PDF resume.", error=True), None, no, no)
+        yield (*stay, gr.update(), "", _status("Please drop a PDF resume.", error=True), None, no, no, no)
         return
     try:
-        cv_text = extract_cv_text(file_path)
+        from job_scout.tools.cv_reader import extract_cv_document
+
+        cv_text, cv_links = extract_cv_document(file_path)
     except CVReadError as exc:
-        yield (*stay, gr.update(), "", _status(f"Could not read that PDF: {exc}", error=True), None, no, no)
+        yield (*stay, gr.update(), "", _status(f"Could not read that PDF: {exc}", error=True), None, no, no, no)
         return
 
-    yield (*go, _loading_html("Reading your resume…"), cv_text, "", gr.update(), no, no)
+    yield (*go, _loading_html("Reading your resume…"), cv_text, "", gr.update(), no, no, no)
     try:
         profile = extract_profile(cv_text, thread_id=thread_id, tags=["phase-2", "ui", "extract"])
     except Exception as exc:  # noqa: BLE001 - show a friendly error and return to start
         msg = f"Couldn't read a profile: {exc}"
         if "api_key" in str(exc).lower() or "credentials" in str(exc).lower():
             msg += " Add an LLM key to .env (OPENAI_API_KEY, or a free SCOUT_MODEL via groq:/ollama:)."
-        yield (*stay, gr.update(), "", _status(msg, error=True), None, no, no)
+        yield (*stay, gr.update(), "", _status(msg, error=True), None, no, no, no)
         return
     choices, selected = _preference_selection(profile, None)
-    voice_bridge.get_bridge().record_profile(profile, cv_text, thread_id)
-    candidate_store.save_candidate(profile, cv_text, _selection_to_prefs(selected))
+    voice_bridge.get_bridge().record_profile(profile, cv_text, thread_id, cv_links)
+    candidate_store.save_candidate(profile, cv_text, _selection_to_prefs(selected), cv_links)
     _voice_context(f"Screen event: the user just uploaded a CV; a profile was extracted for {profile.name or 'the candidate'}.")
-    yield (*go, _profile_html(profile), cv_text, "", profile, choices, gr.update(choices=choices, value=selected))
+    yield (
+        *go,
+        _profile_html(profile, cv_links),
+        cv_text,
+        "",
+        profile,
+        choices,
+        gr.update(choices=choices, value=selected),
+        gr.update(value=[link.model_dump() for link in cv_links]),
+    )
 
 
 def on_find(cv_text: str, profile: Profile | None, thread_id: str, loc_selection: list[str]):
@@ -786,12 +845,16 @@ def on_find(cv_text: str, profile: Profile | None, thread_id: str, loc_selection
 
     prefs = _selection_to_prefs(loc_selection or [])
     effective = candidate_store.effective_profile(profile, prefs)
-    voice_bridge.get_bridge().record_profile(effective, cv_text, thread_id)
-    candidate_store.save_candidate(profile, cv_text, prefs)
+    stored = candidate_store.load_candidate()
+    cv_links = stored.cv_links if stored else []
+    voice_bridge.get_bridge().record_profile(effective, cv_text, thread_id, cv_links)
+    candidate_store.save_candidate(profile, cv_text, prefs, cv_links)
 
     yield (*go, _loading_html("Searching for jobs…"), "", gr.update())
     result = RunResult()
-    for kind, payload in stream_search(effective, cv_text=cv_text, thread_id=thread_id, tags=["phase-2", "ui"]):
+    for kind, payload in stream_search(
+        effective, cv_text=cv_text, cv_links=cv_links, thread_id=thread_id, tags=["phase-2", "ui"]
+    ):
         if kind == "status":
             yield (*go, _loading_html(str(payload)), "", gr.update())
         elif kind == "result":
@@ -884,6 +947,7 @@ def reset():
         gr.update(visible=False),
         [],
         gr.update(choices=[], value=[]),
+        gr.update(value=[]),
     )
 
 
@@ -921,6 +985,12 @@ def build_app() -> gr.Blocks:
             gr.HTML(_stepper(2))
             gr.HTML('<p class="js-section-label">Your profile</p>')
             profile_out = gr.HTML()
+            links_editor = gr.JSON(
+                label="Detected resume links — edit labels if needed",
+                value=[],
+                visible=True,
+                every=None,
+            )
             gr.HTML('<p class="js-section-label" style="margin-top:14px">Where should we search?</p>')
             gr.HTML(
                 '<p class="js-muted" style="font-size:0.86rem">The boxes come from your resume — a suggestion, '
@@ -975,9 +1045,7 @@ def build_app() -> gr.Blocks:
                 tex_btn = gr.DownloadButton("Download tailored CV (.tex)", visible=False, variant="secondary")
             with gr.Row():
                 cover_letter_pdf_btn = gr.DownloadButton("Download cover letter (PDF)", visible=False, variant="primary")
-                cover_letter_tex_btn = gr.DownloadButton(
-                    "Download cover letter (.tex)", visible=False, variant="secondary"
-                )
+                cover_letter_tex_btn = gr.DownloadButton("Download cover letter (.tex)", visible=False, variant="secondary")
             tailor_footer = gr.HTML()
             back_btn = gr.Button("Back to jobs", variant="secondary")
             restart_btn2 = gr.Button("Start over", variant="secondary")
@@ -995,7 +1063,11 @@ def build_app() -> gr.Blocks:
                 profile_state,
                 loc_choices_state,
                 loc_group,
+                links_editor,
             ],
+        )
+        links_editor.change(
+            on_links_change, inputs=[links_editor, profile_state, cv_text_state, thread_id], outputs=[links_editor]
         )
         linkedin_file.change(on_zip, inputs=[linkedin_file], outputs=[linkedin_zip_state])
         loc_group.input(on_prefs_change, inputs=[loc_group, profile_state, cv_text_state, thread_id])
@@ -1053,6 +1125,7 @@ def build_app() -> gr.Blocks:
             cover_letter_tex_btn,
             loc_choices_state,
             loc_group,
+            links_editor,
         ]
         change_btn.click(reset, outputs=reset_outputs)
         restart_btn.click(reset, outputs=reset_outputs)
@@ -1086,7 +1159,16 @@ def build_app() -> gr.Blocks:
         demo.load(
             _on_load,
             inputs=[thread_id],
-            outputs=[page_start, page_profile, profile_out, cv_text_state, profile_state, loc_choices_state, loc_group],
+            outputs=[
+                page_start,
+                page_profile,
+                profile_out,
+                cv_text_state,
+                profile_state,
+                loc_choices_state,
+                loc_group,
+                links_editor,
+            ],
         )
 
     return demo

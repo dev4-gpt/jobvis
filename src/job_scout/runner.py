@@ -15,7 +15,15 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 
 from job_scout.config import get_settings
 from job_scout.graph import get_compiled_graph
-from job_scout.graph.schemas import FabricationReport, Profile, RankedJob, SourceDiagnostic, TailoringPack
+from job_scout.graph.schemas import (
+    CoverLetterQualityReport,
+    CVLink,
+    FabricationReport,
+    Profile,
+    RankedJob,
+    SourceDiagnostic,
+    TailoringPack,
+)
 from job_scout.profile import extract_profile
 from job_scout.tracing import attach_cv, get_tracer, opik_url, trace_graph
 
@@ -71,6 +79,7 @@ def stream_search(
     thread_id: str,
     tags: list[str],
     selected_job_id: str | None = None,
+    cv_links: list[CVLink] | None = None,
 ) -> Iterator[tuple[str, object]]:
     """Run the job-finding graph for an already-extracted profile.
 
@@ -86,7 +95,7 @@ def stream_search(
     callbacks = [usage_cb] + ([tracer] if tracer else [])
 
     graph = trace_graph(get_compiled_graph(), tracer)
-    inputs = {"profile": profile, "cv_text": cv_text, "selected_job_id": selected_job_id}
+    inputs = {"profile": profile, "cv_text": cv_text, "cv_links": cv_links or [], "selected_job_id": selected_job_id}
     config = {"configurable": {"thread_id": thread_id}, "callbacks": callbacks, "recursion_limit": 25}
 
     result = RunResult(opik_url=opik_url(), profile=profile)
@@ -126,6 +135,7 @@ class TailorResult:
     pack: TailoringPack | None = None
     fabrication_flags: int = 0
     fabrication_report: FabricationReport | None = None
+    cover_letter_quality: CoverLetterQualityReport | None = None
     research_used: bool = False
     errors: list[str] = field(default_factory=list)
     cost_usd: float = 0.0
@@ -170,6 +180,7 @@ def stream_tailor(
         result.pack = final.get("tailoring")
         result.fabrication_flags = final.get("fabrication_flags", 0)
         result.fabrication_report = final.get("fabrication_report")
+        result.cover_letter_quality = final.get("cover_letter_quality")
         result.research_used = bool(final.get("research_notes"))
         result.errors = final.get("errors", [])
     except Exception as exc:  # noqa: BLE001 - report as a failed run, keep the trace

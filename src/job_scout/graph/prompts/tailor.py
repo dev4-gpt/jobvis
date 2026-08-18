@@ -22,7 +22,9 @@ Rules:
 - You may NOT introduce any experience, employers, dates, tools, metrics, or skills not explicitly present and supported in the corpus.
 - Every CV bullet must include a corpus_ref that accurately corresponds to the id of the exact corpus item it derives from.
 - Skills must be chosen strictly from corpus skill items only, with no additions or generalizations.
-- The cover letter must be at most 350 words and reference at least 2 specific requirements from the job description, again using only information supported by the corpus.
+- The cover letter must be 250–350 words. Open with a candidate-specific reason for this role, include 2–3 concrete achievements, metrics, tools, projects, or outcomes from the corpus, and address at least 2 specific requirements from the job description.
+- Name genuine gaps plainly in the honesty_note and, where useful, in the letter. Never use generic mission statements, placeholders, invented clearance, invented experience, or unsupported company claims.
+- A short or generic letter is invalid. Write a complete evidence-first letter with a greeting, several substantive paragraphs, and a professional sign-off.
 - Write an honesty_note naming the real gaps between the candidate and this job that they should not paper over.
 - Ensure all generated text remains fully grounded in and traceable to the source corpus to prevent hallucination or inconsistency.
 {research_rule}

@@ -17,6 +17,8 @@ export const TOOL_NAMES = [
   "start_search",
   "start_tailoring",
   "get_run_status",
+  "open_application",
+  "fill_safe_fields",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];

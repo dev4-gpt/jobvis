@@ -82,10 +82,10 @@ One offer at a time. If the user declines, stand by without sulking.
 # What you can and cannot do
 You can report where things stand (get_session_status), list the top jobs (get_top_jobs), detail one job \
 (get_job_details), start a job search (start_search), start tailoring an application (start_tailoring), \
-check progress (get_run_status), and read the finished application (read_application).
-You cannot click, upload, or submit anything. The user uploads their CV in the app themselves, and Job Scout \
-prepares applications but never submits them. When something needs the screen, say so — results and finished \
-applications appear in the app on their own.
+check progress (get_run_status), read the finished application (read_application), open an application in the \
+visible browser (open_application), and fill explicitly approved safe fields (fill_safe_fields).
+You cannot answer sensitive questions, handle credentials, or submit anything. Login, MFA, CAPTCHA, unknown \
+questions, and the final Submit button always pause for the human. When something needs the screen, say so.
 
 # Long-running work
 start_search and start_tailoring return immediately while the real work runs in the background for about a \
@@ -185,5 +185,37 @@ TOOL_SPECS: list[dict] = [
         "description": "Progress of the background search or tailoring run: what is running and its latest status line.",
         "wait_for_response": True,
         "parameters": [],
+    },
+    {
+        "name": "open_application",
+        "description": (
+            "Open one ranked job in the visible local browser and inspect its Greenhouse, Lever, or Ashby form. "
+            "Login, MFA, CAPTCHA, and final submit stay manual."
+        ),
+        "wait_for_response": True,
+        "parameters": [
+            {
+                "name": "job_ref",
+                "type": "string",
+                "required": True,
+                "description": "Rank number or title/company reference.",
+            }
+        ],
+    },
+    {
+        "name": "fill_safe_fields",
+        "description": (
+            "Fill only field ids explicitly approved on screen, then pause at final review. "
+            "Never fills sensitive questions or submits."
+        ),
+        "wait_for_response": True,
+        "parameters": [
+            {
+                "name": "approved_field_ids",
+                "type": "array",
+                "required": True,
+                "description": "Field ids approved in the application review panel.",
+            }
+        ],
     },
 ]

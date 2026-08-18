@@ -428,6 +428,33 @@ body {
   flex: none;
 }
 
+.mini-action {
+  margin-left: auto;
+  border: 1px solid var(--glass-edge);
+  border-radius: 999px;
+  background: rgba(210, 200, 255, 0.08);
+  color: var(--ink);
+  padding: 6px 10px;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  cursor: pointer;
+}
+
+.field-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-dim);
+}
+
+.field-row input {
+  margin-top: 2px;
+  accent-color: var(--cyan);
+}
+
 /* --- application ---------------------------------------------------------- */
 .headline {
   font-size: 1rem;

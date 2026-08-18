@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from job_scout.config import get_settings
 from job_scout.corpus import build_corpus
+from job_scout.cover_letter_quality import evaluate_cover_letter
 from job_scout.graph.nodes.rank_jobs import _render_profile
 from job_scout.graph.prompts.tailor import RESEARCH_RULE, TAILOR_PROMPT
 from job_scout.graph.schemas import RankedJob, TailoringPack
@@ -86,5 +87,28 @@ def tailor(state: AgentState) -> dict:
         research=research or "none",
     )
     pack: TailoringPack = model.invoke(prompt)
-
-    return {"tailoring": pack, "research_notes": research, "llm_calls": calls + 1, "errors": errors}
+    # Links are source metadata, not LLM content. Re-attach them after every
+    # response so a model can never silently discard a clickable resume link.
+    pack.cv.links = list(state.get("cv_links", []))
+    quality = evaluate_cover_letter(pack.cover_letter, ranked.job.description, "\n".join(item.text for item in corpus.items))
+    total_calls = calls + 1
+    if not quality.passed and total_calls < settings.max_llm_calls_per_run:
+        repair_prompt = (
+            f"{prompt}\n\nYour first draft failed this deterministic quality gate: "
+            f"{'; '.join(quality.reasons)}. Rewrite only the cover_letter field as a complete 250–350 word "
+            "evidence-first letter. Keep the CV and honesty_note grounded in the corpus."
+        )
+        repaired: TailoringPack = model.invoke(repair_prompt)
+        repaired.cv.links = list(state.get("cv_links", []))
+        pack = repaired
+        total_calls += 1
+        quality = evaluate_cover_letter(pack.cover_letter, ranked.job.description, "\n".join(item.text for item in corpus.items))
+    if not quality.passed:
+        errors.append("tailor: cover-letter quality gate failed — review or regenerate before sending")
+    return {
+        "tailoring": pack if pack.cover_letter.strip() else None,
+        "research_notes": research,
+        "llm_calls": total_calls,
+        "cover_letter_quality": quality,
+        "errors": errors,
+    }

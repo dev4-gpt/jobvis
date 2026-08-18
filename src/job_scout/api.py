@@ -36,6 +36,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from job_scout import candidate_store
+from job_scout.application.controller import get_application_controller
 from job_scout.config import get_settings
 from job_scout.graph.schemas import Profile, RankedJob, TailoringPack
 from job_scout.renderer import render_cover_letter_pdf, render_pdf
@@ -50,6 +51,7 @@ TOKEN_URL = "https://api.elevenlabs.io/v1/convai/conversation/token"  # noqa: S1
 # The console is a static export, built into web/out. JOBVIS_WEB_DIR overrides
 # it (a different build output, or a checkout that is not the repo root).
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_APPLICATION = get_application_controller()
 
 
 def web_dir() -> Path:
@@ -70,7 +72,7 @@ def ensure_session() -> None:
     stored = candidate_store.load_candidate()
     if stored is not None:
         profile = candidate_store.effective_profile(stored.profile, stored.preferences)
-        bridge.record_profile(profile, stored.cv_text, thread_id)
+        bridge.record_profile(profile, stored.cv_text, thread_id, stored.cv_links)
 
 
 def _job_row(ranked: RankedJob, rank: int) -> dict:
@@ -103,8 +105,12 @@ def _pack_payload(values: dict) -> dict | None:
         "summary": pack.cv.summary,
         "cover_letter": pack.cover_letter,
         "honesty_note": pack.honesty_note,
+        "links": [link.model_dump() for link in pack.cv.links],
         "flags": flags,
         "verdict": _verdict(flags),
+        "cover_letter_quality": values.get("cover_letter_quality").model_dump()
+        if values.get("cover_letter_quality") is not None
+        else None,
     }
 
 
@@ -134,6 +140,7 @@ def current_state() -> dict:
         "jobs": [_job_row(r, i) for i, r in enumerate(ranked[:5], 1)],
         "pack": _pack_payload(values),
         "run": bridge.run_status(),
+        "application": _APPLICATION.state.public(),
     }
 
 
@@ -348,6 +355,35 @@ def create_app() -> FastAPI:
         # Same guard as the SSE frames: the console losing its state endpoint is
         # a worse failure than one field arriving as a repr.
         return _jsonable(current_state(), "state")
+
+    @app.get("/api/application/state")
+    def application_state() -> dict:
+        return _APPLICATION.state.public()
+
+    @app.post("/api/application/open")
+    def application_open(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        """Open an ATS application in the visible local browser; never submit."""
+        ensure_session()
+        bridge = voice_bridge.get_bridge()
+        values = voice_bridge.checkpoint_values(bridge.snapshot().thread_id)
+        job_id = str((parameters or {}).get("job_id") or "")
+        ranked = next((item for item in values.get("ranked_jobs") or [] if item.job.job_id == job_id), None)
+        if ranked is None or bridge.snapshot().profile is None:
+            raise HTTPException(status_code=404, detail="ranked job not found in the current checkpoint")
+        return _APPLICATION.open(ranked, bridge.snapshot().profile, bridge.snapshot().cv_links or [])
+
+    @app.post("/api/application/inspect")
+    def application_inspect(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        """Inspect supplied local fixture HTML; production flow reads the visible page."""
+        body = parameters or {}
+        return _APPLICATION.inspect_html(str(body.get("url") or "http://fixture.local"), str(body.get("html") or ""))
+
+    @app.post("/api/application/fill-safe")
+    def application_fill_safe(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        approved = {str(item) for item in (parameters or {}).get("approved_field_ids", [])}
+        cv_pdf, _, letter_pdf, _ = _render_paths()
+        artifacts = {key: path for key, path in (("resume", cv_pdf), ("cover", letter_pdf)) if path is not None}
+        return _APPLICATION.fill_safe(approved, artifacts)
 
     @app.get("/api/events")
     async def events(request: Request) -> StreamingResponse:

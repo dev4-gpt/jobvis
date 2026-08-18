@@ -11,6 +11,7 @@ fabrication validator) applied to a new modality.
 from __future__ import annotations
 
 import job_scout.voice.bridge as _bridge
+from job_scout.application.controller import get_application_controller
 from job_scout.graph.schemas import RankedJob, TailoringPack
 
 _MAX_JOBS = 5
@@ -173,6 +174,29 @@ def get_run_status(parameters: dict | None = None) -> dict:
     return status
 
 
+def open_application(parameters: dict | None = None) -> dict:
+    """Open one ranked job in a visible local browser for human review."""
+    bridge = _bridge.get_bridge()
+    snap = bridge.snapshot()
+    ranked = _bridge.ranked_jobs(snap.thread_id)
+    index, candidates = _resolve_job_ref((parameters or {}).get("job_ref"), ranked)
+    if index is None:
+        return {"opened": False, "candidates": candidates, "note": "Choose a ranked job first."}
+    if snap.profile is None:
+        return {"opened": False, "note": _NO_CV_NOTE}
+    state = get_application_controller().open(ranked[index], snap.profile, snap.cv_links or [])
+    return {"opened": state.get("status") != "blocked", "note": state.get("message", ""), "status": state.get("status")}
+
+
+def fill_safe_fields(parameters: dict | None = None) -> dict:
+    """Fill only field ids the user explicitly approved, then stop at review."""
+    ids = {str(item) for item in (parameters or {}).get("approved_field_ids", [])}
+    if not ids:
+        return {"filled": False, "note": "No fields were approved. Review the mapping on screen first."}
+    state = get_application_controller().fill_safe(ids)
+    return {"filled": state.get("status") == "final_review", "note": state.get("message", ""), "status": state.get("status")}
+
+
 CLIENT_TOOL_HANDLERS = {
     "get_session_status": get_session_status,
     "get_top_jobs": get_top_jobs,
@@ -181,6 +205,8 @@ CLIENT_TOOL_HANDLERS = {
     "start_search": start_search,
     "start_tailoring": start_tailoring,
     "get_run_status": get_run_status,
+    "open_application": open_application,
+    "fill_safe_fields": fill_safe_fields,
 }
 
 

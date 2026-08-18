@@ -21,8 +21,18 @@ import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import JobvisOrb from "@/components/JobvisOrb";
-import { ActivityPanel, JobsPanel, NextPanel, PackPanel, nextStep } from "@/components/Panels";
-import { eventsUrl, getConfig, getLastVoiceError, getSessionStart, getState, type Config, type State } from "@/lib/api";
+import { ActivityPanel, ApplicationPanel, JobsPanel, NextPanel, PackPanel, nextStep } from "@/components/Panels";
+import {
+  eventsUrl,
+  fillSafeFields,
+  getConfig,
+  getLastVoiceError,
+  getSessionStart,
+  getState,
+  openApplication,
+  type Config,
+  type State,
+} from "@/lib/api";
 import { GESTURES_ENABLED } from "@/lib/handTracker";
 import type { OrbMode } from "@/lib/orbScene";
 import { buildClientTools } from "@/lib/tools";
@@ -34,6 +44,7 @@ const EMPTY_STATE: State = {
   jobs: [],
   pack: null,
   run: { running: false },
+  application: { job_id: "", url: "", status: "idle", message: "", ats: null, fields: [] },
 };
 
 type Line = { role: string; text: string };
@@ -151,6 +162,24 @@ function Console() {
 
   const step = nextStep(state, mode);
 
+  async function openJobApplication(jobId: string) {
+    try {
+      const application = await openApplication(jobId);
+      setState((current) => ({ ...current, application }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
+  async function approveSafeFields(ids: string[]) {
+    try {
+      const application = await fillSafeFields(ids);
+      setState((current) => ({ ...current, application }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
   async function toggle() {
     if (connected) {
       conversation.endSession();
@@ -234,8 +263,9 @@ function Console() {
           <NextPanel step={step} />
         )}
 
-        <JobsPanel state={state} />
+        <JobsPanel state={state} onOpenApplication={openJobApplication} />
         <PackPanel state={state} />
+        <ApplicationPanel state={state} onFillSafe={approveSafeFields} />
         <ActivityPanel lines={lines} />
       </main>
 

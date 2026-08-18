@@ -23,6 +23,17 @@ export type Pack = {
   honesty_note: string;
   flags: number;
   verdict: string;
+  links?: { label: string; url: string; page: number }[];
+  cover_letter_quality?: { passed: boolean; word_count: number; reasons: string[] } | null;
+};
+
+export type ApplicationState = {
+  job_id: string;
+  url: string;
+  status: string;
+  message: string;
+  ats: string | null;
+  fields: { field_id: string; label: string; confidence: number; sensitive: boolean; reason: string; has_value: boolean }[];
 };
 
 export type Candidate = {
@@ -50,6 +61,7 @@ export type State = {
   jobs: Job[];
   pack: Pack | null;
   run: RunStatus;
+  application: ApplicationState;
 };
 
 export type Config = {
@@ -67,6 +79,28 @@ async function getJson<T>(path: string): Promise<T> {
 
 export const getConfig = () => getJson<Config>("/api/config");
 export const getState = () => getJson<State>("/api/state");
+
+export async function openApplication(jobId: string): Promise<ApplicationState> {
+  const response = await fetch(`${BASE}/api/application/open`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ job_id: jobId }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail ?? `application open failed: ${response.status}`);
+  return body as ApplicationState;
+}
+
+export async function fillSafeFields(approvedFieldIds: string[]): Promise<ApplicationState> {
+  const response = await fetch(`${BASE}/api/application/fill-safe`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ approved_field_ids: approvedFieldIds }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail ?? `safe fill failed: ${response.status}`);
+  return body as ApplicationState;
+}
 
 export type SessionStart = {
   token: string;
@@ -112,4 +146,5 @@ export async function getLastVoiceError(): Promise<{ reason: string; quota: bool
 }
 
 export const packUrl = (kind: "pdf" | "tex") => `${BASE}/api/pack/${kind}`;
+export const coverLetterUrl = (kind: "pdf" | "tex") => `${BASE}/api/pack/cover-letter/${kind}`;
 export const eventsUrl = () => `${BASE}/api/events`;

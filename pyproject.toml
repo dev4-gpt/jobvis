@@ -44,6 +44,11 @@ ollama = ["langchain-ollama>=0.2"]
 optimize = [
     "opik-optimizer>=3.1",
 ]
+application = [
+    "playwright>=1.50",
+    "keyring>=25",
+    "cryptography>=44",
+]
 
 [build-system]
 requires = ["hatchling"]

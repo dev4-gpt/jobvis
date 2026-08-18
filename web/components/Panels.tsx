@@ -9,8 +9,9 @@
  * so it lives in the UI.
  */
 
-import { packUrl, type State } from "@/lib/api";
+import { coverLetterUrl, packUrl, type State } from "@/lib/api";
 import type { OrbMode } from "@/lib/orbScene";
+import { useState } from "react";
 
 export type Step = { now: string; next: string; cue?: string };
 
@@ -64,7 +65,7 @@ export function NextPanel({ step }: { step: Step }) {
   );
 }
 
-export function JobsPanel({ state }: { state: State }) {
+export function JobsPanel({ state, onOpenApplication }: { state: State; onOpenApplication: (jobId: string) => void }) {
   if (state.jobs.length === 0) return null;
   return (
     <section className="block">
@@ -79,6 +80,11 @@ export function JobsPanel({ state }: { state: State }) {
             </span>
           </span>
           <span className="score">{job.fit_score}</span>
+          {job.url && (
+            <button type="button" className="mini-action" onClick={() => onOpenApplication(job.job_id)}>
+              Open application
+            </button>
+          )}
         </div>
       ))}
     </section>
@@ -102,7 +108,49 @@ export function PackPanel({ state }: { state: State }) {
         <a className="pill" href={packUrl("tex")} download>
           .tex
         </a>
+        <a className="pill solid" href={coverLetterUrl("pdf")} download>
+          Cover letter · PDF
+        </a>
+        <a className="pill" href={coverLetterUrl("tex")} download>
+          Letter .tex
+        </a>
       </div>
+    </section>
+  );
+}
+
+export function ApplicationPanel({ state, onFillSafe }: { state: State; onFillSafe: (ids: string[]) => void }) {
+  const application = state.application;
+  const [selected, setSelected] = useState<string[]>([]);
+  if (!application || application.status === "idle") return null;
+  const safeFields = application.fields.filter((field) => !field.sensitive && field.has_value);
+  return (
+    <section className="block no-drag">
+      <p className="label">Application review · {application.ats ?? "unknown ATS"}</p>
+      <p className="next-line">{application.message}</p>
+      {application.fields.map((field) => (
+        <label className="field-row" key={field.field_id}>
+          <input
+            type="checkbox"
+            disabled={field.sensitive || !field.has_value}
+            checked={selected.includes(field.field_id)}
+            onChange={(event) =>
+              setSelected((current) =>
+                event.target.checked ? [...current, field.field_id] : current.filter((id) => id !== field.field_id),
+              )
+            }
+          />
+          <span>
+            <b>{field.label}</b> · {field.sensitive ? "sensitive — ask manually" : field.has_value ? `${Math.round(field.confidence * 100)}% confidence` : field.reason}
+          </span>
+        </label>
+      ))}
+      {safeFields.length > 0 && (
+        <button type="button" className="pill solid" onClick={() => onFillSafe(selected)} disabled={selected.length === 0}>
+          Fill approved safe fields
+        </button>
+      )}
+      <p className="meta">Login, MFA, CAPTCHA, unknown questions, and Submit remain manual.</p>
     </section>
   );
 }

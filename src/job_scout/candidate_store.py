@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 from typing import NamedTuple
 
-from job_scout.graph.schemas import Profile
+from job_scout.graph.schemas import CVLink, Profile
 
 _STORE_DIR = Path(__file__).resolve().parents[2] / "data" / "candidate"
 _STORE_PATH = _STORE_DIR / "profile.json"
@@ -35,12 +35,19 @@ class StoredCandidate(NamedTuple):
     profile: Profile
     cv_text: str
     preferences: dict | None  # {"locations": [...], "remote": bool}; None on v1 files
+    cv_links: list[CVLink] = []
 
 
-def save_candidate(profile: Profile, cv_text: str, preferences: dict | None = None) -> None:
+def save_candidate(profile: Profile, cv_text: str, preferences: dict | None = None, cv_links: list[CVLink] | None = None) -> None:
     """Persist the candidate, replacing any previous one."""
     _STORE_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {"version": 2, "profile": profile.model_dump(), "cv_text": cv_text, "preferences": preferences}
+    payload = {
+        "version": 3,
+        "profile": profile.model_dump(),
+        "cv_text": cv_text,
+        "preferences": preferences,
+        "cv_links": [link.model_dump() for link in (cv_links or [])],
+    }
     _STORE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -49,7 +56,8 @@ def load_candidate() -> StoredCandidate | None:
     try:
         payload = json.loads(_STORE_PATH.read_text(encoding="utf-8"))
         profile = Profile.model_validate(payload["profile"])
-        return StoredCandidate(profile, str(payload["cv_text"]), payload.get("preferences"))
+        links = [CVLink.model_validate(item) for item in payload.get("cv_links", [])]
+        return StoredCandidate(profile, str(payload["cv_text"]), payload.get("preferences"), links)
     except (OSError, ValueError, KeyError):
         return None
 

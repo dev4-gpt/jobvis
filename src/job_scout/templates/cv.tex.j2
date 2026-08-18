@@ -7,6 +7,7 @@
 \usepackage[utf8]{inputenc}
 \usepackage{enumitem}
 \usepackage{parskip}
+\usepackage[hidelinks]{hyperref}
 \pagestyle{empty}
 \setlist[itemize]{leftmargin=1.2em, itemsep=1pt, topsep=2pt}
 
@@ -16,6 +17,13 @@
 
 {\LARGE\bfseries << name | tex >>}\\[2pt]
 {\itshape << cv.headline | tex >>}
+
+<% if cv.links %>
+\smallskip
+<% for link in cv.links %>
+\href{<< link.url | urltex >>}{<< link.label | tex >>}<% if not loop.last %> \textbar{} <% endif %>
+<% endfor %>
+<% endif %>
 
 \sectionrule{Summary}
 << cv.summary | tex >>

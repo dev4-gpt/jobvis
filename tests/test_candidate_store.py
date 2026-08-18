@@ -75,13 +75,14 @@ def test_on_load_without_store_is_a_noop(tmp_store, fresh_bridge):
 def test_on_load_restores_candidate_and_opens_step_two(tmp_store, fresh_bridge, sample_profile):
     tmp_store.save_candidate(sample_profile, "cv text here", {"locations": ["Tokyo, Japan"], "remote": False})
 
-    page_start, page_profile, profile_html, cv_text, profile, loc_choices, loc_group = app_module._on_load("t1")
+    page_start, page_profile, profile_html, cv_text, profile, loc_choices, loc_group, links = app_module._on_load("t1")
 
     assert page_start["visible"] is False and page_profile["visible"] is True
     assert "Test Candidate" in profile_html and "Restored from your last session" in profile_html
     assert cv_text == "cv text here"
     assert profile == sample_profile  # the RAW profile — extraction stays what was measured
     assert "Tokyo, Japan" in loc_choices and loc_group["value"] == ["Tokyo, Japan"]  # stored choice wins, remote off
+    assert links.get("value") == []
     snap = fresh_bridge.snapshot()
     assert snap.profile.locations == ["Tokyo, Japan"] and snap.profile.remote_ok is False  # Jobvis sees the choice
     assert snap.step == "profile"

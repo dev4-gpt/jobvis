@@ -48,7 +48,8 @@ def test_happy_path_returns_pack_and_increments_budget(monkeypatch, sample_profi
     update = tailor(_state(profile=sample_profile))
 
     assert isinstance(update["tailoring"], TailoringPack)
-    assert update["llm_calls"] == 4
+    # The short fixture letter triggers the bounded quality-repair call.
+    assert update["llm_calls"] == 5
     assert update["research_notes"] is None  # keyless env skips Tavily
     prompt = llm.with_structured_output().invoke.call_args[0][0]
     assert "[cv-bullet-001]" in prompt  # corpus rendered with ids

@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from typing import cast
 
 from job_scout.graph import get_compiled_graph
-from job_scout.graph.schemas import Profile, RankedJob
+from job_scout.graph.schemas import CVLink, Profile, RankedJob
 from job_scout.runner import RunResult, TailorResult, stream_search, stream_tailor
 
 VOICE_TAGS = ["phase-2", "voice"]
@@ -48,6 +48,7 @@ class WizardSnapshot:
     step: str = "start"  # start | profile | results | tailor
     profile: Profile | None = None
     cv_text: str = ""
+    cv_links: list[CVLink] = None  # type: ignore[assignment]
     linkedin_zip_path: str | None = None
 
 
@@ -95,9 +96,16 @@ class VoiceBridge:
             self._snapshot = WizardSnapshot(thread_id=thread_id)
             self._run = None
 
-    def record_profile(self, profile: Profile, cv_text: str, thread_id: str) -> None:
+    def record_profile(self, profile: Profile, cv_text: str, thread_id: str, cv_links: list[CVLink] | None = None) -> None:
         with self._lock:
-            self._snapshot = replace(self._snapshot, thread_id=thread_id, step="profile", profile=profile, cv_text=cv_text)
+            self._snapshot = replace(
+                self._snapshot,
+                thread_id=thread_id,
+                step="profile",
+                profile=profile,
+                cv_text=cv_text,
+                cv_links=list(cv_links or []),
+            )
 
     def record_step(self, step: str) -> None:
         with self._lock:
@@ -216,7 +224,12 @@ class VoiceBridge:
         result = RunResult()
         try:
             stream = stream_search(
-                snap.profile, cv_text=snap.cv_text, thread_id=snap.thread_id, tags=VOICE_TAGS, selected_job_id=None
+                snap.profile,
+                cv_text=snap.cv_text,
+                cv_links=snap.cv_links or [],
+                thread_id=snap.thread_id,
+                tags=VOICE_TAGS,
+                selected_job_id=None,
             )
             for kind, payload in stream:
                 if kind == "status":

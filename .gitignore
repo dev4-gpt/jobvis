@@ -23,6 +23,10 @@ dist/
 # The locally persisted candidate (CV text + profile) — personal data, never committed
 data/candidate/
 
+# Browser sessions and answer memory contain impersonation-capable cookies or
+# personal answers. They must stay local and outside Git.
+data/private/
+
 # OS
 .DS_Store
 

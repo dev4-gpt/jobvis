@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from job_scout.graph.schemas import FabricationReport, JobPosting, Profile, RankedJob, SourceDiagnostic, TailoringPack
+from job_scout.graph.schemas import (
+    CoverLetterQualityReport,
+    CVLink,
+    FabricationReport,
+    JobPosting,
+    Profile,
+    RankedJob,
+    SourceDiagnostic,
+    TailoringPack,
+)
 
 
 class AgentState(TypedDict, total=False):
@@ -23,6 +32,7 @@ class AgentState(TypedDict, total=False):
     """
 
     cv_text: str
+    cv_links: list[CVLink]
     profile: Profile | None
     search_query: str | None
     jobs: list[JobPosting]
@@ -38,3 +48,4 @@ class AgentState(TypedDict, total=False):
     research_notes: str | None
     fabrication_flags: int
     fabrication_report: FabricationReport | None
+    cover_letter_quality: CoverLetterQualityReport | None

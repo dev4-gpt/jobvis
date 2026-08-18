@@ -70,6 +70,17 @@ make app                # http://localhost:7860
 
 The app remembers your CV and chosen locations between runs ("Start over" forgets). Jobs are always fetched fresh.
 
+Resume links are extracted from PDF annotations, shown for review, and carried
+into the generated CV as clickable links. Tailoring also applies a deterministic
+250–350-word evidence gate to the cover letter; a failed draft gets one bounded
+repair attempt and remains visibly marked for review.
+
+The optional review-gated browser workflow is documented in
+[`docs/application_autofill.md`](docs/application_autofill.md). It can inspect
+Greenhouse, Lever, and Ashby forms and fill only approved safe fields in a
+visible local browser. It never stores passwords and never submits an
+application.
+
 ## 🎙️ Jobvis, the voice console (optional, Part 4)
 
 Ask out loud, "find me jobs", and the search starts. Jobvis tells you it has begun, goes quiet while it runs, then breaks the silence itself to say what it found. Ask it to tailor an application and the finished pack appears on screen while it reads you the highlights.
