@@ -93,6 +93,7 @@ Ask out loud, "find me jobs", and the search starts. Jobvis tells you it has beg
 make jobvis-agent     # creates the agent from voice/persona.py, prints the agent id
                       # paste it back as ELEVENLABS_AGENT_ID
 make web-build        # npm ci + a Next.js static export into web/out
+make stop             # stop local Jobvis listeners before restarting
 make app              # wizard on :7860 AND the console on :8000, one process
 ```
 

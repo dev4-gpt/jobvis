@@ -20,6 +20,18 @@ setup: ## Install deps and pre-commit hooks
 app: ## Launch both surfaces: the wizard on :7860 and the Jobvis console on :8000
 	$(UV_RUN) python -m job_scout.app
 
+.PHONY: stop
+stop: ## Stop only local listeners occupying the Jobvis ports (:7860 and :8000)
+	@for port in 7860 8000; do \
+		pids="$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null || true)"; \
+		if [ -n "$$pids" ]; then \
+			echo "Stopping Jobvis listener(s) on :$$port: $$pids"; \
+			kill $$pids; \
+		else \
+			echo "No listener on :$$port"; \
+		fi; \
+	done
+
 .PHONY: jobvis-api
 jobvis-api: ## API only, no wizard — for frontend work with `make web-dev` (empty session)
 	uv run python -m job_scout.api
