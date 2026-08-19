@@ -164,8 +164,15 @@ def fetch_jobs(state: AgentState) -> dict:
         # ``tool_use_failed`` before the model reaches our search adapter.
         # Keep the provider-specific workaround at the boundary: the rest of
         # the graph still receives the same constrained search arguments.
+        reasoning_effort = "low" if "openai/gpt-oss" in model_name else "none"
         request_model = with_structured_output(
-            get_chat_model(model_name, temperature=0.0, reasoning_effort="none", timeout=60, max_retries=3),
+            get_chat_model(
+                model_name,
+                temperature=0.0,
+                reasoning_effort=reasoning_effort,
+                timeout=60,
+                max_retries=3,
+            ),
             SearchRequest,
             model_name,
         )

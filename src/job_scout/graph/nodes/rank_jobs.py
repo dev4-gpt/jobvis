@@ -95,7 +95,8 @@ def rank_jobs(state: AgentState) -> dict:
 
     model_kwargs = {"timeout": settings.scout_rank_timeout, "max_retries": 1}
     if settings.scout_model.startswith("groq:"):
-        model_kwargs["reasoning_effort"] = "none"
+        # Qwen exposes ``none``; GPT-OSS requires one of low/medium/high.
+        model_kwargs["reasoning_effort"] = "low" if "openai/gpt-oss" in settings.scout_model else "none"
     model = with_structured_output(
         get_chat_model(settings.scout_model, temperature=0.0, **model_kwargs), JobScores, settings.scout_model
     )
