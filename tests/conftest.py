@@ -25,6 +25,9 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 # change test behavior.
 os.environ["SCOUT_MAX_JOBS"] = "10"
 os.environ["SCOUT_MAX_REFORMULATIONS"] = "2"
+# Do not let a developer's provider choice change which mocked fetch path the
+# offline node tests exercise. Provider-specific Groq coverage is explicit.
+os.environ["SCOUT_MODEL"] = "openai:test-model"
 os.environ["SCOUT_FETCH_MODEL"] = ""
 os.environ["SCOUT_RANK_BATCH"] = "4"
 os.environ["SCOUT_FAB_BULLET_RATIO"] = "0.65"

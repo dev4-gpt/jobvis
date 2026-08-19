@@ -10,9 +10,9 @@ from __future__ import annotations
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from job_scout.config import get_settings
-from job_scout.graph.schemas import JobPosting
+from job_scout.graph.schemas import JobPosting, SearchRequest
 from job_scout.graph.state import AgentState
-from job_scout.llm import ensure_budget, get_chat_model
+from job_scout.llm import ensure_budget, get_chat_model, with_structured_output
 from job_scout.tools.jobs_api import location_to_country, search_jobs
 from job_scout.tools.jobs_api import run_search_detailed as run_search
 
@@ -43,6 +43,11 @@ _SYSTEM = (
     "experience — their current or latest role and strongest skills, at the right "
     "seniority — rather than a broad catch-all or an older, adjacent role. "
     "Pick a country code from their location and set the remote flag from their preference."
+)
+
+_STRUCTURED_SYSTEM = (
+    "You choose arguments for a job search. Return one JSON object matching the "
+    "requested schema. Do not call tools and do not include commentary.\n" + _SYSTEM.split("\n", 1)[1]
 )
 
 # A prompt is a request, not a guarantee, so the constraint is also enforced
@@ -81,30 +86,45 @@ def fetch_jobs(state: AgentState) -> dict:
     # Choosing tool arguments is a trivial call — SCOUT_FETCH_MODEL lets a
     # small/fast model do it (~1s instead of ~3s) without touching ranking.
     model_name = settings.scout_fetch_model or settings.scout_model
-    model = get_chat_model(model_name, temperature=0.0).bind_tools([search_jobs])
-    message = model.invoke([SystemMessage(_SYSTEM), HumanMessage(_build_prompt(state))])
+    if model_name.startswith("groq:"):
+        # Groq's Qwen models support structured JSON output, while this
+        # LangChain-generated function schema can intermittently fail with
+        # ``tool_use_failed`` before the model reaches our search adapter.
+        # Keep the provider-specific workaround at the boundary: the rest of
+        # the graph still receives the same constrained search arguments.
+        request_model = with_structured_output(
+            get_chat_model(model_name, temperature=0.0, reasoning_effort="none", timeout=60, max_retries=1),
+            SearchRequest,
+            model_name,
+        )
+        request: SearchRequest = request_model.invoke([SystemMessage(_STRUCTURED_SYSTEM), HumanMessage(_build_prompt(state))])
+        query, dropped = _trim_query(request.query)
+        model_country = request.country or None
+    else:
+        model = get_chat_model(model_name, temperature=0.0).bind_tools([search_jobs])
+        message = model.invoke([SystemMessage(_SYSTEM), HumanMessage(_build_prompt(state))])
+        if message.tool_calls:
+            args = message.tool_calls[0]["args"]
+            query = args.get("query") or " ".join(profile.primary_roles[:2])
+            query, dropped = _trim_query(query)
+            model_country = args.get("country")
+        else:
+            errors.append("fetch_jobs: LLM issued no tool call; used profile-derived query")
+            query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3])
+            query, dropped = _trim_query(query)
+            model_country = None
     calls += 1
 
-    explicit_location = profile.locations[0] if profile.locations else None
-    model_country = None
-    if message.tool_calls:
-        args = message.tool_calls[0]["args"]
-        query = args.get("query") or " ".join(profile.primary_roles[:2])
-        query, dropped = _trim_query(query)
-        if dropped:
-            # Visible in the trace rather than silent: a query that needed
-            # trimming is the early warning that the sources are about to
-            # return nothing and the fallback board is about to fill in.
-            errors.append(f"fetch_jobs: query trimmed to {MAX_QUERY_WORDS} words, dropped {dropped!r}")
-        model_country = args.get("country")
-    else:
-        errors.append("fetch_jobs: LLM issued no tool call; used profile-derived query")
-        query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3])
-        model_country = None
+    if dropped:
+        # Visible in the trace rather than silent: a query that needed
+        # trimming is the early warning that the sources are about to return
+        # nothing and the fallback board is about to fill in.
+        errors.append(f"fetch_jobs: query trimmed to {MAX_QUERY_WORDS} words, dropped {dropped!r}")
 
     # Human scope is authoritative. The model may formulate the query, but it
     # cannot narrow a country-wide relocation choice, change the country, or
     # turn off the user's remote preference.
+    explicit_location = profile.locations[0] if profile.locations else None
     normalized_locations = {loc.strip().lower() for loc in profile.locations}
     if normalized_locations & _US_SCOPE_VALUES:
         location = None

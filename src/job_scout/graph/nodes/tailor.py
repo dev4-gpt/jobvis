@@ -23,7 +23,7 @@ from job_scout.graph.nodes.rank_jobs import _render_profile
 from job_scout.graph.prompts.tailor import RESEARCH_RULE, TAILOR_PROMPT
 from job_scout.graph.schemas import RankedJob, TailoringPack
 from job_scout.graph.state import AgentState
-from job_scout.llm import ensure_budget, get_chat_model
+from job_scout.llm import ensure_budget, get_chat_model, with_structured_output
 from job_scout.tools.research import research_company
 
 _DESCRIPTION_LIMIT = 3000
@@ -78,7 +78,7 @@ def tailor(state: AgentState) -> dict:
     # A dedicated tailoring model is optional; an empty setting intentionally
     # falls back to the primary provider/model used by the rest of the run.
     tailor_model = settings.scout_tailor_model or settings.scout_model
-    model = get_chat_model(tailor_model, temperature=0.3).with_structured_output(TailoringPack)
+    model = with_structured_output(get_chat_model(tailor_model, temperature=0.3), TailoringPack, tailor_model)
     prompt = TAILOR_PROMPT.format(
         research_rule=RESEARCH_RULE if research else "",
         profile=_render_profile(profile),

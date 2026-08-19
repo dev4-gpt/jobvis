@@ -8,7 +8,7 @@ import job_scout.graph.nodes.reformulate_query as reformulate_mod
 from job_scout.graph.nodes.fetch_jobs import fetch_jobs
 from job_scout.graph.nodes.rank_jobs import rank_jobs
 from job_scout.graph.nodes.reformulate_query import reformulate_query
-from job_scout.graph.schemas import JobScore, JobScores
+from job_scout.graph.schemas import JobScore, JobScores, SearchRequest
 from tests.conftest import make_job, plain_llm, structured_llm, tool_calling_llm
 
 
@@ -28,6 +28,37 @@ def test_fetch_jobs_uses_llm_tool_args(monkeypatch, sample_profile, sample_jobs)
     assert out["jobs_sources"] == ["adzuna"]
     assert out["search_query"] == "ml engineer"
     assert out["llm_calls"] == 2
+
+
+def test_fetch_jobs_uses_structured_args_for_groq(monkeypatch, sample_profile, sample_jobs):
+    """Groq fetches avoid the fragile LangChain function-call schema."""
+    llm = structured_llm(SearchRequest(query="ml engineer", country="de", remote=True))
+    monkeypatch.setattr(fetch_mod, "get_chat_model", lambda *a, **k: llm)
+    monkeypatch.setattr(
+        fetch_mod,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "scout_fetch_model": "groq:qwen/qwen3.6-27b",
+                "scout_model": "groq:qwen/qwen3.6-27b",
+                "max_llm_calls_per_run": 25,
+                "scout_max_jobs": 10,
+            },
+        )(),
+    )
+    captured = {}
+
+    def fake_run_search(query, location, country, remote, limit):
+        captured.update(query=query, country=country, remote=remote)
+        return sample_jobs, ["adzuna"]
+
+    monkeypatch.setattr(fetch_mod, "run_search", fake_run_search)
+    out = fetch_jobs({"profile": sample_profile, "llm_calls": 0})
+    assert captured == {"query": "ml engineer", "country": "de", "remote": True}
+    assert out["jobs"] == sample_jobs
+    assert out["llm_calls"] == 1
 
 
 def test_fetch_jobs_trims_keyword_soup_to_a_title(monkeypatch, sample_profile, sample_jobs):

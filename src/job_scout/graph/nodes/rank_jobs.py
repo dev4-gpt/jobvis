@@ -14,7 +14,7 @@ from job_scout.config import get_settings
 from job_scout.graph.prompts.rank_jobs import RANK_JOBS_PROMPT
 from job_scout.graph.schemas import JobPosting, JobScores, Profile, RankedJob
 from job_scout.graph.state import AgentState
-from job_scout.llm import ensure_budget, get_chat_model
+from job_scout.llm import ensure_budget, get_chat_model, with_structured_output
 
 # Batch size is a latency knob (SCOUT_RANK_BATCH): output tokens — and so batch
 # latency — scale with jobs per batch, and batches run in parallel, so smaller
@@ -80,7 +80,12 @@ def rank_jobs(state: AgentState) -> dict:
     n_batches = (len(to_score) + batch_size - 1) // batch_size
     ensure_budget(calls, n_batches, settings.max_llm_calls_per_run)
 
-    model = get_chat_model(settings.scout_model, temperature=0.0).with_structured_output(JobScores)
+    model_kwargs = {}
+    if settings.scout_model.startswith("groq:"):
+        model_kwargs = {"reasoning_effort": "none", "timeout": 60, "max_retries": 1}
+    model = with_structured_output(
+        get_chat_model(settings.scout_model, temperature=0.0, **model_kwargs), JobScores, settings.scout_model
+    )
 
     def score_batch(batch: list[JobPosting]) -> JobScores:
         prompt = RANK_JOBS_PROMPT.format(profile=_render_profile(profile), jobs=_render_jobs(batch))

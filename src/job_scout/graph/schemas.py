@@ -49,6 +49,22 @@ class JobPosting(BaseModel):
     source: JobSourceName
 
 
+class SearchRequest(BaseModel):
+    """Typed search arguments returned by providers with fragile tool calling.
+
+    Groq's Qwen endpoint supports structured JSON output, but some LangChain
+    tool schemas can still produce a ``tool_use_failed`` response. Keeping the
+    fetch contract as a small typed object gives that provider the same
+    constrained query-selection behaviour without asking it to emit a function
+    call.
+    """
+
+    query: str = Field(description="A two-to-four-word job title search query")
+    country: str = Field(default="", description="A two-letter country code, or an empty string")
+    remote: bool = Field(default=False, description="Whether to prioritize remote-friendly roles")
+    limit: int = Field(default=25, ge=1, le=50, description="Maximum number of postings")
+
+
 class SourceDiagnostic(BaseModel):
     """Observable outcome of one attempted job source."""
 

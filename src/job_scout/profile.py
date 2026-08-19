@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from job_scout.config import get_settings
 from job_scout.graph.schemas import Profile
-from job_scout.llm import get_chat_model
+from job_scout.llm import get_chat_model, with_structured_output
 
 EXTRACT_PROFILE_PROMPT_NAME = "extract_profile"
 
@@ -44,7 +44,8 @@ def extract_profile(
     from job_scout.tracing import get_tracer
 
     settings = get_settings()
-    llm = get_chat_model(model or settings.scout_model, temperature=0.0).with_structured_output(Profile)
+    model_name = model or settings.scout_model
+    llm = with_structured_output(get_chat_model(model_name, temperature=0.0), Profile, model_name)
 
     tracer = get_tracer(thread_id, tags or ["extract"]) if thread_id else None
     config = {"callbacks": [tracer]} if tracer else {}
