@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from job_scout.candidate_fit import preferences_from_dict
 from job_scout.config import get_settings
-from job_scout.graph.schemas import JobPosting, SearchRequest
+from job_scout.graph.schemas import CandidatePreferences, JobPosting, SearchRequest, SourceDiagnostic
 from job_scout.graph.state import AgentState
 from job_scout.llm import ensure_budget, get_chat_model, with_structured_output
 from job_scout.tools.jobs_api import location_to_country, search_jobs
@@ -55,6 +56,29 @@ _STRUCTURED_SYSTEM = (
 # padding without letting a skill list through.
 MAX_QUERY_WORDS = 6
 
+_ROLE_QUERIES = (
+    ("ai_ml", "Applied ML Engineer"),
+    ("ai_ml", "AI/ML Engineer"),
+    ("data_science", "Data Scientist"),
+    ("genai", "GenAI Engineer"),
+    ("genai", "LLM RAG Engineer"),
+    ("mlops", "Junior MLOps Engineer"),
+    ("computer_vision", "Computer Vision Engineer"),
+)
+
+
+def _candidate_queries(profile, preferences: CandidatePreferences, reformulation_count: int) -> list[str]:
+    """Build bounded title-only queries from the human-selected role families."""
+    families = set(preferences.primary_role_families)
+    queries = [query for family, query in _ROLE_QUERIES if family in families]
+    if not queries:
+        queries = ["Data Scientist"]
+    if reformulation_count and len(queries) > 1:
+        # A reformulation pass broadens via the remaining title families rather
+        # than inventing a skill soup or relaxing the candidate's policy.
+        queries = queries[reformulation_count % len(queries) :] + queries[: reformulation_count % len(queries)]
+    return list(dict.fromkeys(queries))[:6]
+
 
 def _build_prompt(state: AgentState) -> str:
     """Describe the candidate to the LLM, adding reformulation guidance if looping."""
@@ -82,6 +106,54 @@ def fetch_jobs(state: AgentState) -> dict:
     ensure_budget(calls, 1, settings.max_llm_calls_per_run)
     profile = state["profile"]
     errors = list(state.get("errors", []))
+
+    # A real candidate search uses deterministic role-family fan-out. The
+    # legacy one-query path remains for notebooks and older callers that do not
+    # supply a CandidatePreferences object.
+    raw_preferences = state.get("candidate_preferences")
+    if raw_preferences is not None:
+        preferences = preferences_from_dict(raw_preferences if isinstance(raw_preferences, dict) else raw_preferences)
+        query_list = _candidate_queries(profile, preferences, state.get("reformulation_count", 0))
+        all_jobs: list[JobPosting] = []
+        all_sources: list[str] = []
+        diagnostics_by_source: dict[str, SourceDiagnostic] = {}
+        for query in query_list:
+            location, country = _authoritative_location(profile)
+            search = run_search(
+                query=query,
+                location=location,
+                country=country,
+                remote="remote" in preferences.accepted_work_modes,
+                limit=max(3, settings.scout_max_jobs // 2),
+            )
+            if isinstance(search, tuple):
+                jobs, sources = search
+                diagnostics = []
+            else:
+                jobs, sources, diagnostics = search.jobs, search.sources_used, search.diagnostics
+            all_jobs.extend(jobs)
+            all_sources.extend(sources)
+            for diagnostic in diagnostics:
+                current = diagnostics_by_source.get(diagnostic.source)
+                if current is None:
+                    diagnostics_by_source[diagnostic.source] = diagnostic.model_copy(deep=True)
+                else:
+                    current.completed = current.completed or diagnostic.completed
+                    current.timed_out = current.timed_out or diagnostic.timed_out
+                    current.latency_ms += diagnostic.latency_ms
+                    current.returned += diagnostic.returned
+                    current.contributed = current.contributed or diagnostic.contributed
+                    if diagnostic.error:
+                        current.error = diagnostic.error
+        jobs = _dedupe_with_existing(state.get("jobs", []), all_jobs)[:MERGED_CEILING]
+        return {
+            "jobs": jobs,
+            "search_query": " | ".join(query_list),
+            "jobs_sources": list(dict.fromkeys(all_sources)),
+            "source_diagnostics": list(diagnostics_by_source.values()),
+            "errors": errors,
+            "llm_calls": calls,
+        }
 
     # Choosing tool arguments is a trivial call — SCOUT_FETCH_MODEL lets a
     # small/fast model do it (~1s instead of ~3s) without touching ranking.
@@ -124,17 +196,7 @@ def fetch_jobs(state: AgentState) -> dict:
     # Human scope is authoritative. The model may formulate the query, but it
     # cannot narrow a country-wide relocation choice, change the country, or
     # turn off the user's remote preference.
-    explicit_location = profile.locations[0] if profile.locations else None
-    normalized_locations = {loc.strip().lower() for loc in profile.locations}
-    if normalized_locations & _US_SCOPE_VALUES:
-        location = None
-        country = "us"
-    elif explicit_location:
-        location = explicit_location
-        country = location_to_country(explicit_location)
-    else:
-        location = None
-        country = model_country
+    location, country = _authoritative_location(profile, model_country=model_country)
     remote = profile.remote_ok
 
     search = run_search(query=query, location=location, country=country, remote=remote, limit=settings.scout_max_jobs)
@@ -157,6 +219,17 @@ def fetch_jobs(state: AgentState) -> dict:
     }
 
 
+def _authoritative_location(profile, *, model_country: str | None = None) -> tuple[str | None, str | None]:
+    """Return location scope from the user-facing profile, never the LLM."""
+    explicit_location = profile.locations[0] if profile.locations else None
+    normalized_locations = {loc.strip().lower() for loc in profile.locations}
+    if normalized_locations & _US_SCOPE_VALUES:
+        return None, "us"
+    if explicit_location:
+        return explicit_location, location_to_country(explicit_location)
+    return None, model_country
+
+
 def _trim_query(query: str) -> tuple[str, str]:
     """Cut a query back to a title-length phrase.
 
@@ -173,11 +246,18 @@ def _trim_query(query: str) -> tuple[str, str]:
 
 def _dedupe_with_existing(existing: list[JobPosting], new: list[JobPosting]) -> list[JobPosting]:
     """On a reformulation loop, merge new results with prior ones, deduped."""
-    seen = {(j.title.strip().lower(), j.company.strip().lower()) for j in existing}
+    seen = {_stable_identity(j) for j in existing}
     merged = list(existing)
     for job in new:
-        key = (job.title.strip().lower(), job.company.strip().lower())
+        key = _stable_identity(job)
         if key not in seen:
             seen.add(key)
             merged.append(job)
     return merged
+
+
+def _stable_identity(job: JobPosting) -> str:
+    """Prefer the apply URL; fall back to a normalized title/company identity."""
+    if job.url:
+        return "|".join((job.url.strip().lower().rstrip("/"), job.title.strip().lower(), job.company.strip().lower()))
+    return "|".join((job.title.strip().lower(), job.company.strip().lower(), job.location.strip().lower()))

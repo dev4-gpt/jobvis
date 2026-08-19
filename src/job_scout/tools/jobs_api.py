@@ -311,11 +311,15 @@ class CacheSource:
 
 
 def _dedupe(jobs: list[JobPosting]) -> list[JobPosting]:
-    """Drop jobs sharing a ``(title, company)`` with an earlier one."""
-    seen: set[tuple[str, str]] = set()
+    """Drop jobs sharing a stable apply URL or normalized title/company/location."""
+    seen: set[str] = set()
     out: list[JobPosting] = []
     for job in jobs:
-        key = (job.title.strip().lower(), job.company.strip().lower())
+        key = (
+            "|".join((job.url.strip().lower().rstrip("/"), job.title.strip().lower(), job.company.strip().lower()))
+            if job.url
+            else "|".join((job.title.strip().lower(), job.company.strip().lower(), job.location.strip().lower()))
+        )
         if key not in seen:
             seen.add(key)
             out.append(job)
@@ -398,6 +402,7 @@ def run_search_detailed(
                 found = fut.result(timeout=timeout)
             except TimeoutError:
                 diagnostics[name].timed_out = True
+                _complete(name, [], "timed out")
                 return []
             except Exception as exc:  # noqa: BLE001 - a dead source is an empty source
                 _complete(name, [], f"{type(exc).__name__}: {exc}")
