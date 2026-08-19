@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 
 from job_scout import candidate_store
 from job_scout.application.controller import get_application_controller
+from job_scout.candidate_fit import preferences_from_dict
 from job_scout.config import get_settings
 from job_scout.graph.schemas import Profile, RankedJob, TailoringPack
 from job_scout.renderer import render_cover_letter_pdf, render_pdf
@@ -76,7 +77,7 @@ def ensure_session() -> None:
 
 
 def _job_row(ranked: RankedJob, rank: int) -> dict:
-    return {
+    row = {
         "rank": rank,
         "job_id": ranked.job.job_id,
         "title": ranked.job.title,
@@ -86,6 +87,27 @@ def _job_row(ranked: RankedJob, rank: int) -> dict:
         "fit_score": ranked.fit_score,
         "why": ranked.fit_explanation,
     }
+    has_policy = (
+        ranked.final_priority_score
+        or ranked.role_fit_score
+        or ranked.evidence_fit_score
+        or ranked.primary_or_adjacent != "review"
+    )
+    if has_policy:
+        row.update(
+            final_priority_score=ranked.final_priority_score or ranked.fit_score,
+            role_fit_score=ranked.role_fit_score,
+            evidence_fit_score=ranked.evidence_fit_score,
+            eligibility_status=ranked.eligibility_status,
+            eligibility_reasons=ranked.eligibility_reasons,
+            hard_blockers=ranked.hard_blockers,
+            primary_or_adjacent=ranked.primary_or_adjacent,
+            start_timing_fit=ranked.start_timing_fit,
+            employment_type=ranked.job.employment_type,
+            work_mode=ranked.job.work_mode,
+            source=ranked.job.source,
+        )
+    return row
 
 
 def _verdict(flags: int) -> str:
@@ -93,6 +115,12 @@ def _verdict(flags: int) -> str:
         return "Every claim checked against the CV — no flags."
     plural = "s" if flags != 1 else ""
     return f"{flags} statement{plural} could not be verified — review before sending."
+
+
+def _preference_payload(value: object) -> dict | None:
+    if value is None:
+        return None
+    return preferences_from_dict(value if isinstance(value, dict) else value).model_dump(mode="json")
 
 
 def _pack_payload(values: dict) -> dict | None:
@@ -123,6 +151,10 @@ def _candidate_payload(profile: Profile | None) -> dict | None:
         "seniority": profile.seniority,
         "locations": list(profile.locations),
         "remote_ok": profile.remote_ok,
+        "education_history": [entry.model_dump(mode="json") for entry in profile.education_history],
+        "expected_graduation_date": profile.expected_graduation_date.isoformat() if profile.expected_graduation_date else None,
+        "current_program": profile.current_program,
+        "degree_fields": profile.degree_fields,
     }
 
 
@@ -133,11 +165,23 @@ def current_state() -> dict:
     snap = bridge.snapshot()
     values = voice_bridge.checkpoint_values(snap.thread_id)
     ranked = list(values.get("ranked_jobs") or [])
+    primary = [r for r in ranked if r.primary_or_adjacent == "primary" and r.eligibility_status != "blocked"]
+    adjacent = [r for r in ranked if r.primary_or_adjacent == "adjacent" and r.eligibility_status != "blocked"]
+    blocked = [r for r in ranked if r.eligibility_status == "blocked" or r.primary_or_adjacent == "review"]
     return {
         "step": snap.step,
         "thread_id": snap.thread_id,
         "candidate": _candidate_payload(snap.profile),
         "jobs": [_job_row(r, i) for i, r in enumerate(ranked[:5], 1)],
+        "candidate_preferences": _preference_payload(values.get("candidate_preferences")),
+        "source_coverage": {
+            "fetched": len(values.get("jobs") or []),
+            "ranked": len(ranked),
+            "primary": len(primary),
+            "adjacent": len(adjacent),
+            "blocked_or_review": len(blocked),
+            "sources": sorted({job.job.source for job in values.get("jobs") or []}),
+        },
         "pack": _pack_payload(values),
         "run": bridge.run_status(),
         "application": _APPLICATION.state.public(),

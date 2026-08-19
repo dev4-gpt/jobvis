@@ -26,7 +26,7 @@ from uuid import uuid4
 import gradio as gr
 
 from job_scout import candidate_store
-from job_scout.graph.schemas import CVLink, Profile, RankedJob
+from job_scout.graph.schemas import CandidatePreferences, CVLink, Profile, RankedJob
 from job_scout.profile import extract_profile
 from job_scout.renderer import render_cover_letter_pdf, render_pdf
 from job_scout.runner import RunResult, TailorResult, stream_search, stream_tailor
@@ -360,6 +360,11 @@ def _profile_html(profile: Profile | None, cv_links: list[CVLink] | None = None)
             "These are preserved in the generated CV. Check the labels before tailoring.</p>"
             f"<ul>{rows}</ul></div>"
         )
+    education_summary = (
+        "; ".join((entry.degree + " " + entry.field + " at " + entry.institution).strip() for entry in profile.education_history)
+        or "Not extracted — review the resume"
+    )
+    graduation_summary = str(profile.expected_graduation_date or "Unknown")
     return (
         '<div class="js-card">'
         f'<p class="js-profile-name">{escape(profile.name or "Candidate")}</p>'
@@ -372,6 +377,8 @@ def _profile_html(profile: Profile | None, cv_links: list[CVLink] | None = None)
         f'<div class="js-stat"><div class="js-stat-val">{len(profile.skills)}</div><div class="js-stat-key">Skills</div></div>'
         "</div>"
         f'<p class="js-profile-row"><b>Locations</b> &nbsp;{escape(", ".join(profile.locations) or "—")}</p>'
+        f'<p class="js-profile-row"><b>Education timeline</b> &nbsp;{escape(education_summary)}</p>'
+        f'<p class="js-profile-row"><b>Expected graduation</b> &nbsp;{escape(graduation_summary)}</p>'
         f'<p class="js-profile-row"><b>Languages</b> &nbsp;{languages}</p>'
         f'<div style="margin-top:12px">{skills}</div>{links_html}'
         "</div>"
@@ -408,15 +415,25 @@ def _job_card(ranked: RankedJob, index: int) -> str:
     source = f'<span class="js-source">{escape(job.source)}</span>'
     matched = _chips(ranked.matched_skills, "match", 6)
     gaps = _chips(ranked.gaps, "gap", 4)
+    status = escape(ranked.eligibility_status)
+    bucket = escape(ranked.primary_or_adjacent)
+    reasons = ranked.hard_blockers or ranked.eligibility_reasons
+    policy = "".join(f"<li>{escape(reason)}</li>" for reason in reasons[:3])
+    policy_html = f'<ul class="js-muted" style="margin:8px 0 0;padding-left:18px">{policy}</ul>' if policy else ""
     delay = f"animation-delay:{min(index, 8) * 55}ms"
     return (
         f'<div class="js-job" style="{delay}">'
         '<div class="js-job-head">'
         f"<div>{title_html}"
-        f'<div class="js-job-meta">{escape(job.company)} · {escape(job.location)}{remote}{source}</div></div>'
+        f'<div class="js-job-meta">{escape(job.company)} · {escape(job.location)}{remote}{source}'
+        f' <span class="js-source">{bucket} · {status}</span></div></div>'
         f"{_fit_ring(ranked.fit_score)}"
         "</div>"
         f'<p class="js-job-why">{escape(ranked.fit_explanation)}</p>'
+        f'<p class="js-muted" style="font-size:0.8rem;margin:8px 0 0">'
+        f"Role fit {ranked.role_fit_score} · evidence fit {ranked.evidence_fit_score} · "
+        f"{escape(ranked.job.employment_type)} · {escape(ranked.job.work_mode)} · start {escape(ranked.start_timing_fit)}</p>"
+        f"{policy_html}"
         f"{matched}{gaps}"
         "</div>"
     )
@@ -425,12 +442,32 @@ def _job_card(ranked: RankedJob, index: int) -> str:
 def _results_html(result: RunResult) -> str:
     """Render the ranked jobs as cards, or an empty state."""
     if not result.ranked_jobs:
-        return (
-            '<div class="js-empty"><div class="js-empty-icon">🔍</div>'
-            "<div>No matching jobs found. Try a resume with more detail, or check back later.</div></div>"
+        detail = (
+            "Jobs were fetched, but none produced a usable ranking. Check source diagnostics below."
+            if result.n_jobs_fetched
+            else "No sources returned postings for this policy. Check source diagnostics below."
         )
-    cards = "".join(_job_card(r, i) for i, r in enumerate(result.ranked_jobs))
-    return f'<div class="js-jobs">{cards}</div>'
+        return f'<div class="js-empty"><div class="js-empty-icon">🔍</div><div>{escape(detail)}</div></div>'
+    primary = [r for r in result.ranked_jobs if r.primary_or_adjacent == "primary" and r.eligibility_status != "blocked"]
+    adjacent = [r for r in result.ranked_jobs if r.primary_or_adjacent == "adjacent" and r.eligibility_status != "blocked"]
+    blocked = [r for r in result.ranked_jobs if r.eligibility_status == "blocked" or r.primary_or_adjacent == "review"]
+
+    def section(label: str, jobs: list[RankedJob], empty: str) -> str:
+        cards = "".join(_job_card(r, i) for i, r in enumerate(jobs))
+        body = f'<div class="js-jobs">{cards}</div>' if jobs else f'<div class="js-muted">{empty}</div>'
+        return f'<p class="js-section-label" style="margin-top:18px">{label} ({len(jobs)})</p>{body}'
+
+    sections = [
+        section("Primary matches", primary, "No eligible primary matches yet."),
+        section("Adjacent roles", adjacent, "No adjacent roles returned."),
+        section("Blocked or review-required", blocked, "None."),
+    ]
+    summary = (
+        f'<div class="js-card" style="margin-bottom:14px"><b>{result.n_jobs_fetched} fetched</b> · '
+        f"{len(primary) + len(adjacent)} eligible · {len(primary)} primary · {len(adjacent)} adjacent · "
+        f"{len(blocked)} blocked/review</div>"
+    )
+    return summary + "".join(sections)
 
 
 def _footer_html(result: RunResult) -> str:
@@ -626,7 +663,11 @@ def on_run_tick():
             )
     if run is not None and run.kind == "search" and run.search_result is not None and not run.failed:
         result = run.search_result
-        choices = [(f"{r.job.title} — {r.job.company} (fit {r.fit_score})", r.job.job_id) for r in result.ranked_jobs]
+        choices = [
+            (f"{r.job.title} — {r.job.company} (fit {r.fit_score})", r.job.job_id)
+            for r in result.ranked_jobs
+            if r.eligibility_status != "blocked"
+        ]
         return (
             gr.update(visible=False),
             gr.update(visible=True),
@@ -680,6 +721,29 @@ def _selection_to_prefs(selection: list[str]) -> dict:
     return preferences
 
 
+def _preferences_from_ui(selection: list[str], raw: dict | None) -> tuple[dict, CandidatePreferences | None]:
+    """Combine the location chooser with the typed intent editor.
+
+    ``raw is None`` preserves the legacy handler contract used by notebooks and
+    tests. The browser UI supplies the typed editor, which activates the
+    candidate-aware search path.
+    """
+    legacy = _selection_to_prefs(selection)
+    if not raw:
+        return legacy, None
+    try:
+        typed = CandidatePreferences.model_validate(raw)
+    except Exception:
+        typed = CandidatePreferences()
+    typed = typed.model_copy(
+        update={
+            "locations": legacy["locations"],
+            "country_scope": "us" if legacy.get("country_scope") == "us" else "selected",
+        }
+    )
+    return typed.model_dump(mode="json"), typed
+
+
 def _apply_preferences(profile: Profile, preferences: dict | None) -> Profile:
     """The profile the SEARCH sees: extraction fields overridden by the human's choice.
 
@@ -698,11 +762,13 @@ def _preference_selection(profile: Profile, preferences: dict | None) -> tuple[l
     """(choices, selected) for the chooser — stored preferences win, else the extraction's suggestion."""
     if preferences:
         locations = [loc for loc in (preferences.get("locations") or []) if loc]
-        remote = bool(preferences.get("remote"))
+        remote = bool(preferences.get("remote")) or "remote" in candidate_store.preference_model(preferences).accepted_work_modes
         if preferences.get("country_scope") == "us" or any(_is_us_scope(loc) for loc in locations):
             locations = [US_SCOPE_CHOICE]
     else:
-        locations, remote = list(profile.locations), bool(profile.remote_ok)
+        # New candidates start with the product policy: US-wide relocation and
+        # all work modes accepted. The user can narrow this before searching.
+        locations, remote = [US_SCOPE_CHOICE], True
     choices = [*dict.fromkeys([*profile.locations, *locations, US_SCOPE_CHOICE, REMOTE_CHOICE])]
     return choices, [*locations, *([REMOTE_CHOICE] if remote else [])]
 
@@ -815,8 +881,9 @@ def on_upload(file_path: str | None, thread_id: str):
         yield (*stay, gr.update(), "", _status(msg, error=True), None, no, no, no)
         return
     choices, selected = _preference_selection(profile, None)
-    voice_bridge.get_bridge().record_profile(profile, cv_text, thread_id, cv_links)
-    candidate_store.save_candidate(profile, cv_text, _selection_to_prefs(selected), cv_links)
+    initial_preferences = CandidatePreferences().model_copy(update={"locations": _selection_to_prefs(selected)["locations"]})
+    voice_bridge.get_bridge().record_profile(profile, cv_text, thread_id, cv_links, initial_preferences)
+    candidate_store.save_candidate(profile, cv_text, initial_preferences.model_dump(mode="json"), cv_links)
     _voice_context(f"Screen event: the user just uploaded a CV; a profile was extracted for {profile.name or 'the candidate'}.")
     yield (
         *go,
@@ -830,7 +897,13 @@ def on_upload(file_path: str | None, thread_id: str):
     )
 
 
-def on_find(cv_text: str, profile: Profile | None, thread_id: str, loc_selection: list[str]):
+def on_find(
+    cv_text: str,
+    profile: Profile | None,
+    thread_id: str,
+    loc_selection: list[str],
+    preference_value: dict | None = None,
+):
     """Step 2 → 3: run the job-finding graph for the chosen locations and stream results.
 
     The search runs on the EFFECTIVE profile — extraction overridden by the
@@ -843,24 +916,33 @@ def on_find(cv_text: str, profile: Profile | None, thread_id: str, loc_selection
         yield (gr.update(visible=True), gr.update(visible=False), gr.update(), "", gr.update())
         return
 
-    prefs = _selection_to_prefs(loc_selection or [])
+    prefs, typed_preferences = _preferences_from_ui(loc_selection or [], preference_value)
     effective = candidate_store.effective_profile(profile, prefs)
     stored = candidate_store.load_candidate()
     cv_links = stored.cv_links if stored else []
-    voice_bridge.get_bridge().record_profile(effective, cv_text, thread_id, cv_links)
+    voice_bridge.get_bridge().record_profile(effective, cv_text, thread_id, cv_links, typed_preferences)
     candidate_store.save_candidate(profile, cv_text, prefs, cv_links)
 
     yield (*go, _loading_html("Searching for jobs…"), "", gr.update())
     result = RunResult()
     for kind, payload in stream_search(
-        effective, cv_text=cv_text, cv_links=cv_links, thread_id=thread_id, tags=["phase-2", "ui"]
+        effective,
+        cv_text=cv_text,
+        cv_links=cv_links,
+        thread_id=thread_id,
+        tags=["phase-2", "ui"],
+        preferences=typed_preferences,
     ):
         if kind == "status":
             yield (*go, _loading_html(str(payload)), "", gr.update())
         elif kind == "result":
             result = payload  # type: ignore[assignment]
 
-    choices = [(f"{r.job.title} — {r.job.company} (fit {r.fit_score})", r.job.job_id) for r in result.ranked_jobs]
+    choices = [
+        (f"{r.job.title} — {r.job.company} (fit {r.fit_score})", r.job.job_id)
+        for r in result.ranked_jobs
+        if r.eligibility_status != "blocked"
+    ]
     select = gr.update(choices=choices, value=None, visible=bool(choices))
     voice_bridge.get_bridge().record_step("results")
     _voice_context(f"Screen event: an on-screen job search just finished — {len(result.ranked_jobs)} ranked jobs are visible.")
@@ -997,6 +1079,11 @@ def build_app() -> gr.Blocks:
                 "not a decision. Tick cities, or choose <b>Anywhere in the United States</b> if you are open to "
                 "relocating to any US city; add anywhere we missed.</p>"
             )
+            target_preferences = gr.JSON(
+                label="Target search policy (edit before searching)",
+                value=CandidatePreferences().model_dump(mode="json"),
+                visible=True,
+            )
             # Keep the two global choices present even before profile extraction
             # finishes. This prevents Gradio from rejecting a fast click on
             # "Anywhere in the United States" while the dynamic city choices
@@ -1083,7 +1170,7 @@ def build_app() -> gr.Blocks:
         )
         find_btn.click(
             on_find,
-            inputs=[cv_text_state, profile_state, thread_id, loc_group],
+            inputs=[cv_text_state, profile_state, thread_id, loc_group, target_preferences],
             outputs=[page_profile, page_results, results_out, footer_out, job_select],
         )
         tailor_btn.click(
