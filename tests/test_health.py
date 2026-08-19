@@ -18,6 +18,9 @@ def test_health_is_keyless_and_does_not_call_external_services(monkeypatch):
     assert result["status"] == "ok"
     assert result["graph"]
     assert result["has_llm_key"] is False
+    assert result["models"]["scout"]["ready"] is False
+    assert result["models"]["fetch"]["model"] == "openai:gpt-4o-mini"
+    assert result["models"]["tailor"]["provider"] == "openai"
 
 
 def test_app_import_is_safe_in_a_fresh_process():
