@@ -3,10 +3,13 @@
 # Keep the src/ layout explicit so local commands do not depend on the
 # platform-specific behavior of uv/hatch editable installs.
 UV_RUN := PYTHONPATH=src uv run
-# Override with `make CONSOLE_PORT=8001 app`, or set JOBVIS_CONSOLE_PORT in
-# .env. This lets Jobvis coexist with another local service on :8000.
+# Override with `make CONSOLE_PORT=8001 WIZARD_PORT=7861 app`, or export the
+# corresponding JOBVIS_* variables. This lets Jobvis coexist with unrelated
+# local services on either default port.
 CONSOLE_PORT ?= $(if $(JOBVIS_CONSOLE_PORT),$(JOBVIS_CONSOLE_PORT),8000)
+WIZARD_PORT ?= $(if $(JOBVIS_WIZARD_PORT),$(JOBVIS_WIZARD_PORT),7860)
 JOBVIS_CONSOLE_ENV := $(if $(JOBVIS_CONSOLE_PORT),JOBVIS_CONSOLE_PORT=$(JOBVIS_CONSOLE_PORT),$(if $(filter-out 8000,$(CONSOLE_PORT)),JOBVIS_CONSOLE_PORT=$(CONSOLE_PORT),))
+JOBVIS_WIZARD_ENV := $(if $(JOBVIS_WIZARD_PORT),JOBVIS_WIZARD_PORT=$(JOBVIS_WIZARD_PORT),$(if $(filter-out 7860,$(WIZARD_PORT)),JOBVIS_WIZARD_PORT=$(WIZARD_PORT),))
 
 # Self-documenting help: any target with a `## comment` is listed.
 .PHONY: help
@@ -21,16 +24,16 @@ setup: ## Install deps and pre-commit hooks
 	uv run pre-commit install
 
 .PHONY: app
-app: preflight ## Launch both surfaces: the wizard on :7860 and the Jobvis console on the configured port
-	$(JOBVIS_CONSOLE_ENV) $(UV_RUN) python -m job_scout.app
+app: preflight ## Launch both surfaces: wizard on configured port and console on configured port
+	$(JOBVIS_WIZARD_ENV) $(JOBVIS_CONSOLE_ENV) $(UV_RUN) python -m job_scout.app
 
 .PHONY: preflight
 preflight: ## Validate imports, graph compilation, and model-role configuration before launch
 	$(UV_RUN) python -m job_scout.health
 
 .PHONY: stop
-stop: ## Stop only local listeners occupying the Jobvis ports (:7860 and configured console port)
-	@for port in 7860 $(CONSOLE_PORT); do \
+stop: ## Stop only local listeners occupying the configured Jobvis ports
+	@for port in $(WIZARD_PORT) $(CONSOLE_PORT); do \
 		pids="$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null || true)"; \
 		if [ -n "$$pids" ]; then \
 			echo "Stopping Jobvis listener(s) on :$$port: $$pids"; \

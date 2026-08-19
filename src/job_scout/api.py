@@ -315,7 +315,7 @@ def create_app() -> FastAPI:
         return {
             "voice_ok": voice_ok,
             "voice_hint": hint,
-            "wizard_url": "http://localhost:7860",
+            "wizard_url": f"http://localhost:{WIZARD_PORT}",
             "has_candidate": candidate_store.load_candidate() is not None,
         }
 
@@ -474,6 +474,7 @@ def create_app() -> FastAPI:
 # The default matches the documented local setup.  Keep this configurable so
 # Jobvis can coexist with another local service that already owns :8000.
 CONSOLE_PORT = int(os.getenv("JOBVIS_CONSOLE_PORT", "8000"))
+WIZARD_PORT = int(os.getenv("JOBVIS_WIZARD_PORT", "7860"))
 
 
 def serve_in_thread(port: int = CONSOLE_PORT) -> None:
