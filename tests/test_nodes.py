@@ -8,7 +8,7 @@ import job_scout.graph.nodes.reformulate_query as reformulate_mod
 from job_scout.graph.nodes.fetch_jobs import fetch_jobs
 from job_scout.graph.nodes.rank_jobs import rank_jobs
 from job_scout.graph.nodes.reformulate_query import reformulate_query
-from job_scout.graph.schemas import JobScore, JobScores, SearchRequest
+from job_scout.graph.schemas import CandidatePreferences, JobScore, JobScores, SearchRequest
 from tests.conftest import make_job, plain_llm, structured_llm, tool_calling_llm
 
 
@@ -120,6 +120,21 @@ def test_fetch_jobs_country_scope_overrides_model_location_and_remote(monkeypatc
     assert captured == {"query": "ml engineer", "location": None, "country": "us", "remote": True}
 
 
+def test_fetch_jobs_uses_role_family_fanout_for_candidate_preferences(monkeypatch, sample_profile, sample_jobs):
+    queries = []
+
+    def fake_run_search(query, location, country, remote, limit):
+        queries.append(query)
+        return [sample_jobs[0].model_copy(update={"job_id": query, "title": query})], ["cache"]
+
+    monkeypatch.setattr(fetch_mod, "run_search", fake_run_search)
+    prefs = CandidatePreferences(country_scope="us", primary_role_families=["ai_ml", "genai"])
+    out = fetch_jobs({"profile": sample_profile, "candidate_preferences": prefs, "llm_calls": 0})
+    assert queries == ["Applied ML Engineer", "AI/ML Engineer", "GenAI Engineer", "LLM RAG Engineer"]
+    assert out["llm_calls"] == 0
+    assert len(out["jobs"]) == 4
+
+
 def test_rank_jobs_batches_by_five(monkeypatch, sample_profile):
     jobs = [make_job(f"j{i}", f"Role {i}", f"Co{i}") for i in range(7)]
     calls = []
@@ -146,6 +161,32 @@ def test_rank_jobs_batches_by_five(monkeypatch, sample_profile):
 def test_rank_jobs_empty_jobs(sample_profile):
     out = rank_jobs({"profile": sample_profile, "jobs": [], "llm_calls": 0})
     assert out["ranked_jobs"] == []
+
+
+def test_rank_jobs_applies_deterministic_candidate_policy(monkeypatch, sample_profile):
+    jobs = [
+        make_job("primary", "Data Scientist", "Acme").model_copy(
+            update={"description": "Full-time onsite role starting January 2027; Python and SQL."}
+        ),
+        make_job("intern", "Data Scientist Intern", "Acme").model_copy(
+            update={"description": "Summer internship requiring Python."}
+        ),
+    ]
+    model = structured_llm(
+        JobScores(
+            scores=[
+                JobScore(job_id="primary", fit_score=90, fit_explanation="strong evidence", matched_skills=["python"]),
+                JobScore(job_id="intern", fit_score=95, fit_explanation="intern fit", matched_skills=["python"]),
+            ]
+        )
+    )
+    monkeypatch.setattr(rank_mod, "get_chat_model", lambda *a, **k: model)
+    prefs = CandidatePreferences()
+    out = rank_jobs({"profile": sample_profile, "jobs": jobs, "candidate_preferences": prefs, "llm_calls": 0})
+    by_id = {item.job.job_id: item for item in out["ranked_jobs"]}
+    assert by_id["primary"].eligibility_status in {"eligible", "borderline"}
+    assert by_id["intern"].eligibility_status == "blocked"
+    assert by_id["intern"].fit_score < by_id["primary"].fit_score
 
 
 def test_reformulate_increments_counter(monkeypatch, sample_profile):
