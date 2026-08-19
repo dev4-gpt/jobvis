@@ -65,6 +65,7 @@ def get_chat_model(model: str, temperature: float = 0.0, **kwargs: object) -> Ba
             api_key=settings.nvidia_api_key.get_secret_value(),
             base_url=settings.nvidia_base_url,
             temperature=temperature,
+            **kwargs,
         )
     return init_chat_model(model, temperature=temperature, **kwargs)
 

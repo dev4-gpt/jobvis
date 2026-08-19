@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     scout_max_reformulations: int = Field(default=2, alias="SCOUT_MAX_REFORMULATIONS")
     scout_fetch_model: str = Field(default="", alias="SCOUT_FETCH_MODEL")
     scout_rank_batch: int = Field(default=4, alias="SCOUT_RANK_BATCH")
+    scout_rank_timeout: float = Field(default=45.0, alias="SCOUT_RANK_TIMEOUT")
     scout_concurrent_sources: bool = Field(default=True, alias="SCOUT_CONCURRENT_SOURCES")
     # 1.0s is measured, not guessed. The deadline is paid in full on every
     # search (adzuna is already finished by ~1s, so wall clock == deadline),

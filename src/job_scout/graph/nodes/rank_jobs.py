@@ -93,9 +93,9 @@ def rank_jobs(state: AgentState) -> dict:
     n_batches = (len(to_score) + batch_size - 1) // batch_size
     ensure_budget(calls, n_batches, settings.max_llm_calls_per_run)
 
-    model_kwargs = {}
+    model_kwargs = {"timeout": settings.scout_rank_timeout, "max_retries": 1}
     if settings.scout_model.startswith("groq:"):
-        model_kwargs = {"reasoning_effort": "none", "timeout": 60, "max_retries": 3}
+        model_kwargs["reasoning_effort"] = "none"
     model = with_structured_output(
         get_chat_model(settings.scout_model, temperature=0.0, **model_kwargs), JobScores, settings.scout_model
     )
@@ -112,9 +112,22 @@ def rank_jobs(state: AgentState) -> dict:
     if len(batches) == 1:
         results = [score_batch(batches[0])]
     else:
-        with ThreadPoolExecutor(max_workers=min(len(batches), MAX_PARALLEL_BATCHES)) as pool:
-            futures = [pool.submit(contextvars.copy_context().run, score_batch, batch) for batch in batches]
-            results = [future.result() for future in futures]
+        pool = ThreadPoolExecutor(max_workers=min(len(batches), MAX_PARALLEL_BATCHES))
+        futures = [pool.submit(contextvars.copy_context().run, score_batch, batch) for batch in batches]
+        try:
+            results = [future.result(timeout=settings.scout_rank_timeout) for future in futures]
+        except TimeoutError as exc:
+            for future in futures:
+                future.cancel()
+            # Do not wait for a provider that ignored its client timeout; the
+            # graph must return a visible failure instead of hanging the UI.
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise TimeoutError(
+                f"Ranking exceeded SCOUT_RANK_TIMEOUT={settings.scout_rank_timeout:.0f}s; "
+                "reduce SCOUT_RANK_BATCH or choose a faster model."
+            ) from exc
+        else:
+            pool.shutdown(wait=True)
     calls += len(batches)
 
     for result in results:
