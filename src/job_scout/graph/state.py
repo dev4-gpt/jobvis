@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 from job_scout.graph.schemas import (
+    CandidatePreferences,
     CoverLetterQualityReport,
     CVLink,
     FabricationReport,
@@ -49,3 +50,4 @@ class AgentState(TypedDict, total=False):
     fabrication_flags: int
     fabrication_report: FabricationReport | None
     cover_letter_quality: CoverLetterQualityReport | None
+    candidate_preferences: CandidatePreferences | None

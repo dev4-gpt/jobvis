@@ -58,6 +58,8 @@ _CHECKPOINT_TYPES = [
     ("job_scout.graph.schemas", name)
     for name in (
         "Profile",
+        "EducationEntry",
+        "CandidatePreferences",
         "JobPosting",
         "RankedJob",
         "TailoredBullet",

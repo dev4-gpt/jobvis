@@ -13,12 +13,15 @@ checkpointer (e.g. Postgres) this would have required a real migration.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 Seniority = Literal["junior", "mid", "senior", "lead", "unknown"]
 JobSourceName = Literal["jsearch", "adzuna", "remotive", "cache"]
+EligibilityStatus = Literal["eligible", "borderline", "blocked"]
+RoleBucket = Literal["primary", "adjacent", "review"]
 
 
 class Profile(BaseModel):
@@ -33,6 +36,42 @@ class Profile(BaseModel):
     languages: list[str] = Field(default_factory=list)
     remote_ok: bool = False
     raw_summary: str = ""
+    education_history: list[EducationEntry] = Field(default_factory=list)
+    expected_graduation_date: date | None = None
+    current_program: str | None = None
+    degree_fields: list[str] = Field(default_factory=list)
+    professional_experience_months: int | None = None
+    phone: str | None = None
+    resume_evidence_refs: list[str] = Field(default_factory=list)
+
+
+class EducationEntry(BaseModel):
+    """One education record extracted from the resume."""
+
+    institution: str
+    degree: str = ""
+    field: str = ""
+    start_date: date | None = None
+    end_date: date | None = None
+    in_progress: bool = False
+    source_ref: str | None = None
+
+
+class CandidatePreferences(BaseModel):
+    """Human-authored search policy; model output cannot override it."""
+
+    employment_types: list[str] = Field(default_factory=lambda: ["full_time"])
+    target_start_min: date | None = date(2026, 12, 1)
+    target_start_max: date | None = date(2027, 3, 31)
+    country_scope: str = "us"
+    locations: list[str] = Field(default_factory=list)
+    accepted_work_modes: list[str] = Field(default_factory=lambda: ["remote", "hybrid", "onsite"])
+    primary_role_families: list[str] = Field(default_factory=lambda: ["ai_ml", "data_science", "genai"])
+    adjacent_role_policy: str = "show_separately"
+    authorization_status: str = "unknown"
+    sponsorship_policy: str = "unknown"
+    clearance_status: str = "unknown"
+    exclude_internships: bool = True
 
 
 class JobPosting(BaseModel):
@@ -47,6 +86,17 @@ class JobPosting(BaseModel):
     url: str = ""
     tags: list[str] = Field(default_factory=list)
     source: JobSourceName
+    employment_type: str = "unknown"
+    work_mode: str = "unknown"
+    experience_level: str = "unknown"
+    posted_at: str | None = None
+    start_date_text: str = ""
+    clearance_required: bool = False
+    authorization_requirement: str = "unknown"
+    sponsorship_signal: str = "unknown"
+    salary_text: str = ""
+    source_url: str = ""
+    metadata_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class SearchRequest(BaseModel):
@@ -86,6 +136,8 @@ class JobScore(BaseModel):
     fit_explanation: str
     matched_skills: list[str] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
+    role_fit_score: int | None = Field(default=None, ge=0, le=100)
+    evidence_fit_score: int | None = Field(default=None, ge=0, le=100)
 
 
 class JobScores(BaseModel):
@@ -102,6 +154,14 @@ class RankedJob(BaseModel):
     fit_explanation: str
     matched_skills: list[str] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
+    role_fit_score: int = Field(default=0, ge=0, le=100)
+    evidence_fit_score: int = Field(default=0, ge=0, le=100)
+    eligibility_status: EligibilityStatus = "borderline"
+    eligibility_reasons: list[str] = Field(default_factory=list)
+    hard_blockers: list[str] = Field(default_factory=list)
+    primary_or_adjacent: RoleBucket = "review"
+    start_timing_fit: str = "unknown"
+    final_priority_score: int = Field(default=0, ge=0, le=100)
 
 
 class TailoredBullet(BaseModel):

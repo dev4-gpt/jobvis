@@ -22,7 +22,8 @@ import json
 from pathlib import Path
 from typing import NamedTuple
 
-from job_scout.graph.schemas import CVLink, Profile
+from job_scout.candidate_fit import preferences_from_dict
+from job_scout.graph.schemas import CandidatePreferences, CVLink, Profile
 
 _STORE_DIR = Path(__file__).resolve().parents[2] / "data" / "candidate"
 _STORE_PATH = _STORE_DIR / "profile.json"
@@ -37,12 +38,17 @@ class StoredCandidate(NamedTuple):
     preferences: dict | None  # {"locations": [...], "remote": bool}; None on v1 files
     cv_links: list[CVLink] = []
 
+    @property
+    def candidate_preferences(self) -> CandidatePreferences:
+        """Validated intent with defaults filled for legacy stores."""
+        return preferences_from_dict(self.preferences)
+
 
 def save_candidate(profile: Profile, cv_text: str, preferences: dict | None = None, cv_links: list[CVLink] | None = None) -> None:
     """Persist the candidate, replacing any previous one."""
     _STORE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
-        "version": 3,
+        "version": 4,
         "profile": profile.model_dump(),
         "cv_text": cv_text,
         "preferences": preferences,
@@ -78,4 +84,11 @@ def effective_profile(profile: Profile, preferences: dict | None) -> Profile:
     locations = list(preferences.get("locations") or [])
     if preferences.get("country_scope") == "us":
         locations = [_US_SCOPE_LOCATION]
-    return profile.model_copy(update={"locations": locations, "remote_ok": bool(preferences.get("remote"))})
+    typed = preferences_from_dict(preferences)
+    remote_ok = "remote" in typed.accepted_work_modes
+    return profile.model_copy(update={"locations": locations, "remote_ok": remote_ok})
+
+
+def preference_model(preferences: dict | CandidatePreferences | None) -> CandidatePreferences:
+    """Expose the typed preference contract without changing v1/v3 JSON shape."""
+    return preferences_from_dict(preferences)
