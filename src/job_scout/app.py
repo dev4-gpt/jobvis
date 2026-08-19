@@ -443,9 +443,13 @@ def _results_html(result: RunResult) -> str:
     """Render the ranked jobs as cards, or an empty state."""
     if not result.ranked_jobs:
         detail = (
-            "Jobs were fetched, but none produced a usable ranking. Check source diagnostics below."
-            if result.n_jobs_fetched
-            else "No sources returned postings for this policy. Check source diagnostics below."
+            "The search did not complete. Check the run status below and try again after fixing the provider."
+            if result.failed
+            else (
+                "Jobs were fetched, but none produced a usable ranking. Check source diagnostics below."
+                if result.n_jobs_fetched
+                else "No sources returned postings for this policy. Check source diagnostics below."
+            )
         )
         return f'<div class="js-empty"><div class="js-empty-icon">🔍</div><div>{escape(detail)}</div></div>'
     primary = [r for r in result.ranked_jobs if r.primary_or_adjacent == "primary" and r.eligibility_status != "blocked"]
