@@ -11,6 +11,7 @@ import { callTool } from "./api";
 
 export const TOOL_NAMES = [
   "get_session_status",
+  "get_candidate_intent",
   "get_top_jobs",
   "get_job_details",
   "read_application",

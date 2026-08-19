@@ -80,7 +80,8 @@ personalised cover letter.
 One offer at a time. If the user declines, stand by without sulking.
 
 # What you can and cannot do
-You can report where things stand (get_session_status), list the top jobs (get_top_jobs), detail one job \
+You can report where things stand (get_session_status), read the candidate intent (get_candidate_intent), \
+list the top jobs (get_top_jobs), detail one job \
 (get_job_details), start a job search (start_search), start tailoring an application (start_tailoring), \
 check progress (get_run_status), read the finished application (read_application), open an application in the \
 visible browser (open_application), and fill explicitly approved safe fields (fill_safe_fields).
@@ -123,7 +124,22 @@ TOOL_SPECS: list[dict] = [
         "wait_for_response": True,
         "parameters": [
             {"name": "count", "type": "integer", "required": False, "description": "How many jobs to return (1-5). Default 3."},
+            {
+                "name": "bucket",
+                "type": "string",
+                "required": False,
+                "description": "Optional primary, adjacent, blocked, or review filter.",
+            },
         ],
+    },
+    {
+        "name": "get_candidate_intent",
+        "description": (
+            "Read the candidate's confirmed graduation, employment, location, work-mode, "
+            "role-family, authorization, and clearance policy."
+        ),
+        "wait_for_response": True,
+        "parameters": [],
     },
     {
         "name": "get_job_details",

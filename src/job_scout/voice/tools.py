@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import job_scout.voice.bridge as _bridge
 from job_scout.application.controller import get_application_controller
+from job_scout.candidate_fit import preferences_from_dict
 from job_scout.graph.schemas import RankedJob, TailoringPack
 
 _MAX_JOBS = 5
@@ -49,6 +50,9 @@ def get_session_status(parameters: dict | None = None) -> dict:
         "candidate_name": (snap.profile.name if snap.profile else None) or "",
         "run_in_progress": bridge.run_in_progress(),
     }
+    intent = values.get("candidate_preferences") or snap.preferences
+    if intent is not None:
+        status["candidate_intent"] = preferences_from_dict(intent).model_dump(mode="json")
     if snap.profile is None:
         status["note"] = _NO_CV_NOTE
     elif not ranked:
@@ -60,6 +64,14 @@ def get_top_jobs(parameters: dict | None = None) -> dict:
     """The top ranked jobs, fit-sorted, trimmed to a speakable brief."""
     snap = _bridge.get_bridge().snapshot()
     ranked = _bridge.ranked_jobs(snap.thread_id)
+    bucket = str((parameters or {}).get("bucket") or "").strip().lower()
+    if bucket in {"primary", "adjacent", "blocked", "review"}:
+        ranked = [
+            item
+            for item in ranked
+            if item.primary_or_adjacent == bucket
+            and (bucket not in {"blocked", "review"} or item.eligibility_status == "blocked")
+        ]
     if not ranked:
         return {"jobs": [], "total_ranked": 0, "note": _NO_CV_NOTE if snap.profile is None else _NO_RESULTS_NOTE}
     count = _clamp_count((parameters or {}).get("count"))
@@ -89,8 +101,23 @@ def get_job_details(parameters: dict | None = None) -> dict:
         "why": _trim(r.fit_explanation),
         "matched_skills": r.matched_skills[:_SKILLS_PER_JOB],
         "gaps": r.gaps[:_GAPS_PER_JOB],
+        "eligibility_status": r.eligibility_status,
+        "eligibility_reasons": r.eligibility_reasons[:3],
+        "hard_blockers": r.hard_blockers[:3],
+        "primary_or_adjacent": r.primary_or_adjacent,
+        "role_fit_score": r.role_fit_score,
+        "evidence_fit_score": r.evidence_fit_score,
+        "start_timing_fit": r.start_timing_fit,
         "has_url": bool(r.job.url),
     }
+
+
+def get_candidate_intent(parameters: dict | None = None) -> dict:
+    """Read the human-authored search policy for voice explanations."""
+    snap = _bridge.get_bridge().snapshot()
+    values = _bridge.checkpoint_values(snap.thread_id)
+    intent = values.get("candidate_preferences") or snap.preferences
+    return {"found": intent is not None, "intent": preferences_from_dict(intent).model_dump(mode="json") if intent else None}
 
 
 def read_application(parameters: dict | None = None) -> dict:
@@ -201,6 +228,7 @@ CLIENT_TOOL_HANDLERS = {
     "get_session_status": get_session_status,
     "get_top_jobs": get_top_jobs,
     "get_job_details": get_job_details,
+    "get_candidate_intent": get_candidate_intent,
     "read_application": read_application,
     "start_search": start_search,
     "start_tailoring": start_tailoring,
@@ -229,6 +257,9 @@ def _job_brief(ranked: RankedJob, rank: int) -> dict:
         "score": ranked.fit_score,
         "matched_skills": ranked.matched_skills[:_SKILLS_PER_JOB],
         "top_gaps": ranked.gaps[:_GAPS_PER_JOB],
+        "eligibility_status": ranked.eligibility_status,
+        "primary_or_adjacent": ranked.primary_or_adjacent,
+        "blockers": ranked.hard_blockers[:2],
     }
 
 

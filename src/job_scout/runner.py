@@ -16,6 +16,7 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from job_scout.config import get_settings
 from job_scout.graph import get_compiled_graph
 from job_scout.graph.schemas import (
+    CandidatePreferences,
     CoverLetterQualityReport,
     CVLink,
     FabricationReport,
@@ -50,6 +51,7 @@ class RunResult:
     ranked_jobs: list[RankedJob] = field(default_factory=list)
     jobs_sources: list[str] = field(default_factory=list)
     source_diagnostics: list[SourceDiagnostic] = field(default_factory=list)
+    candidate_preferences: CandidatePreferences | None = None
     reformulation_count: int = 0
     n_jobs_fetched: int = 0
     n_jobs_ranked: int = 0
@@ -80,6 +82,7 @@ def stream_search(
     tags: list[str],
     selected_job_id: str | None = None,
     cv_links: list[CVLink] | None = None,
+    preferences: CandidatePreferences | dict | None = None,
 ) -> Iterator[tuple[str, object]]:
     """Run the job-finding graph for an already-extracted profile.
 
@@ -95,7 +98,13 @@ def stream_search(
     callbacks = [usage_cb] + ([tracer] if tracer else [])
 
     graph = trace_graph(get_compiled_graph(), tracer)
-    inputs = {"profile": profile, "cv_text": cv_text, "cv_links": cv_links or [], "selected_job_id": selected_job_id}
+    inputs = {
+        "profile": profile,
+        "cv_text": cv_text,
+        "cv_links": cv_links or [],
+        "selected_job_id": selected_job_id,
+        "candidate_preferences": preferences,
+    }
     config = {"configurable": {"thread_id": thread_id}, "callbacks": callbacks, "recursion_limit": 25}
 
     result = RunResult(opik_url=opik_url(), profile=profile)
@@ -110,6 +119,7 @@ def stream_search(
         result.ranked_jobs = final.get("ranked_jobs", [])
         result.jobs_sources = final.get("jobs_sources", [])
         result.source_diagnostics = final.get("source_diagnostics", [])
+        result.candidate_preferences = final.get("candidate_preferences")
         result.reformulation_count = final.get("reformulation_count", 0)
         result.n_jobs_fetched = len(final.get("jobs", []))
         result.n_jobs_ranked = len(result.ranked_jobs)
@@ -212,7 +222,14 @@ def run_once(cv_text: str, *, cv_path: str | None = None, thread_id: str, tags: 
     """
     profile = extract_profile(cv_text, thread_id=thread_id, tags=tags)
     result = RunResult()
-    for kind, payload in stream_search(profile, cv_text=cv_text, cv_path=cv_path, thread_id=thread_id, tags=tags):
+    for kind, payload in stream_search(
+        profile,
+        cv_text=cv_text,
+        cv_path=cv_path,
+        thread_id=thread_id,
+        tags=tags,
+        preferences=CandidatePreferences(),
+    ):
         if kind == "result":
             result = payload  # type: ignore[assignment]
     return result

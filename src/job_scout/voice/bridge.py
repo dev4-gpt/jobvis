@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from typing import cast
 
 from job_scout.graph import get_compiled_graph
-from job_scout.graph.schemas import CVLink, Profile, RankedJob
+from job_scout.graph.schemas import CandidatePreferences, CVLink, Profile, RankedJob
 from job_scout.runner import RunResult, TailorResult, stream_search, stream_tailor
 
 VOICE_TAGS = ["phase-2", "voice"]
@@ -50,6 +50,7 @@ class WizardSnapshot:
     cv_text: str = ""
     cv_links: list[CVLink] = None  # type: ignore[assignment]
     linkedin_zip_path: str | None = None
+    preferences: CandidatePreferences | None = None
 
 
 @dataclass
@@ -96,7 +97,14 @@ class VoiceBridge:
             self._snapshot = WizardSnapshot(thread_id=thread_id)
             self._run = None
 
-    def record_profile(self, profile: Profile, cv_text: str, thread_id: str, cv_links: list[CVLink] | None = None) -> None:
+    def record_profile(
+        self,
+        profile: Profile,
+        cv_text: str,
+        thread_id: str,
+        cv_links: list[CVLink] | None = None,
+        preferences: CandidatePreferences | None = None,
+    ) -> None:
         with self._lock:
             self._snapshot = replace(
                 self._snapshot,
@@ -105,6 +113,7 @@ class VoiceBridge:
                 profile=profile,
                 cv_text=cv_text,
                 cv_links=list(cv_links or []),
+                preferences=preferences if preferences is not None else self._snapshot.preferences,
             )
 
     def record_step(self, step: str) -> None:
@@ -227,6 +236,7 @@ class VoiceBridge:
                 snap.profile,
                 cv_text=snap.cv_text,
                 cv_links=snap.cv_links or [],
+                preferences=snap.preferences,
                 thread_id=snap.thread_id,
                 tags=VOICE_TAGS,
                 selected_job_id=None,
