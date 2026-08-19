@@ -21,8 +21,12 @@ setup: ## Install deps and pre-commit hooks
 	uv run pre-commit install
 
 .PHONY: app
-app: ## Launch both surfaces: the wizard on :7860 and the Jobvis console on the configured port
+app: preflight ## Launch both surfaces: the wizard on :7860 and the Jobvis console on the configured port
 	$(JOBVIS_CONSOLE_ENV) $(UV_RUN) python -m job_scout.app
+
+.PHONY: preflight
+preflight: ## Validate imports, graph compilation, and model-role configuration before launch
+	$(UV_RUN) python -m job_scout.health
 
 .PHONY: stop
 stop: ## Stop only local listeners occupying the Jobvis ports (:7860 and configured console port)
