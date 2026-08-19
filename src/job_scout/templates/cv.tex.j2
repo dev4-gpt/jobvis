@@ -21,7 +21,8 @@
 <% if cv.links %>
 \smallskip
 <% for link in cv.links %>
-\href{<< link.url | urltex >>}{<< link.label | tex >>}<% if not loop.last %> \textbar{} <% endif %>
+\href{<< link.url | urltex >>}{<< link.label | tex >>}<% if not loop.last %><% if loop.index % 5 == 0 %>\\
+<% else %> \textbar{} <% endif %><% endif %>
 <% endfor %>
 <% endif %>
 
@@ -32,6 +33,20 @@
 \sectionrule{Experience}
 <% for entry in cv.experience %>
 {\bfseries << entry.role | tex >>} --- << entry.company | tex >><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
+<% if entry.bullets %>
+\begin{itemize}
+<% for bullet in entry.bullets %>
+  \item << bullet.text | tex >>
+<% endfor %>
+\end{itemize}
+<% endif %>
+<% endfor %>
+<% endif %>
+
+<% if cv.projects %>
+\sectionrule{Selected Projects}
+<% for entry in cv.projects %>
+{\bfseries << entry.role | tex >>}<% if entry.company %> --- << entry.company | tex >><% endif %><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
 <% if entry.bullets %>
 \begin{itemize}
 <% for bullet in entry.bullets %>

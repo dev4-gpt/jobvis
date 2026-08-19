@@ -6,7 +6,7 @@ import shutil
 
 import pytest
 
-from job_scout.graph.schemas import CVContent, ExperienceEntry, TailoredBullet
+from job_scout.graph.schemas import CVContent, CVLink, ExperienceEntry, TailoredBullet
 from job_scout.renderer import (
     OVERLEAF_HINT,
     latex_escape,
@@ -77,6 +77,29 @@ def test_render_tex_is_a_complete_document():
     assert tex.strip().startswith(r"\documentclass")
     assert tex.strip().endswith(r"\end{document}")
     assert r"\begin{itemize}" in tex
+
+
+def test_render_tex_includes_selected_projects_and_clickable_links():
+    cv = CVContent(
+        headline="AI Engineer",
+        summary="Full-time AI/ML candidate.",
+        projects=[
+            ExperienceEntry(
+                role="Legal Document Analyzer",
+                company="Portfolio project",
+                bullets=[TailoredBullet(text="Built a grounded RAG workflow", corpus_ref="cv-bullet-010")],
+            )
+        ],
+        links=[
+            CVLink(label="Portfolio", url="https://portfolio.example/a_b", page=1),
+            CVLink(label="Email", url="mailto:person@example.com", page=1),
+        ],
+    )
+    tex = render_tex(cv, candidate_name="Jane")
+    assert "Selected Projects" in tex
+    assert r"Legal Document Analyzer" in tex
+    assert r"\href{https://portfolio.example/a\_b}{Portfolio}" in tex
+    assert r"\href{mailto:person@example.com}{Email}" in tex
 
 
 def test_render_cover_letter_normalizes_html_and_escapes_latex():

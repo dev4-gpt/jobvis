@@ -507,6 +507,16 @@ def _cv_preview_html(pack) -> str:
                 f"<li>{escape(b.text)}<span class='js-ref'>{escape(b.corpus_ref)}</span></li>" for b in entry.bullets
             )
             parts.append(f"<ul>{bullets}</ul>")
+    if cv.projects:
+        parts.append('<p class="js-section-label">Selected projects</p>')
+        for entry in cv.projects:
+            dates = f' <span class="js-cvprev-dates">{escape(entry.dates)}</span>' if entry.dates else ""
+            parts.append(f'<p class="js-cvprev-role">{escape(entry.role)} — {escape(entry.company)}{dates}</p>')
+            if entry.bullets:
+                bullets = "".join(
+                    f"<li>{escape(b.text)}<span class='js-ref'>{escape(b.corpus_ref)}</span></li>" for b in entry.bullets
+                )
+                parts.append(f"<ul>{bullets}</ul>")
     if cv.skills:
         pills = "".join(f'<span class="js-pill">{escape(s)}</span>' for s in cv.skills)
         parts.append(f'<div style="margin-top:10px">{pills}</div>')

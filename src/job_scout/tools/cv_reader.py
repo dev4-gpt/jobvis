@@ -72,8 +72,27 @@ def _link_label(url: str) -> str:
     host = url.split("/", 3)[2].removeprefix("www.") if "://" in url else url
     if "linkedin" in host:
         return "LinkedIn"
-    if "github" in host:
+    lowered = url.lower()
+    if "internships" in lowered:
+        return "Credentials"
+    if "dev-aryaman" in lowered:
+        return "School GitHub"
+    if lowered.rstrip("/").endswith("github.com/dev4-gpt"):
         return "GitHub"
+    if "autonomous-legal" in lowered:
+        return "Legal analyzer"
+    if "adversarial-attacks" in lowered:
+        return "Vision research"
+    if "researchos" in lowered:
+        return "ResearchOS"
+    if "veloce-agenticos-public" in lowered:
+        return "Landing page"
+    if "product-experience" in lowered:
+        return "Product page"
+    if "genai-and-predai" in lowered:
+        return "GenAI project"
+    if "github" in host:
+        return "GitHub project"
     if "portfolio" in url or "vercel.app" in host:
-        return "Portfolio / project"
+        return "Portfolio"
     return host or "Link"

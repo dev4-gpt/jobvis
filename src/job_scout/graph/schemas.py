@@ -200,6 +200,7 @@ class CVContent(BaseModel):
     headline: str
     summary: str
     experience: list[ExperienceEntry] = Field(default_factory=list)
+    projects: list[ExperienceEntry] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     education: list[str] = Field(default_factory=list)
     links: list[CVLink] = Field(default_factory=list)

@@ -16,18 +16,35 @@ Guards never raise: a missing search state or an unknown job id is recorded in
 
 from __future__ import annotations
 
-from job_scout.candidate_fit import resume_persona
+from job_scout.candidate_fit import preferences_from_dict, resume_persona
 from job_scout.config import get_settings
 from job_scout.corpus import build_corpus
 from job_scout.cover_letter_quality import evaluate_cover_letter
 from job_scout.graph.nodes.rank_jobs import _render_profile
 from job_scout.graph.prompts.tailor import RESEARCH_RULE, TAILOR_PROMPT
-from job_scout.graph.schemas import RankedJob, TailoringPack
+from job_scout.graph.schemas import CandidatePreferences, RankedJob, TailoringPack
 from job_scout.graph.state import AgentState
 from job_scout.llm import ensure_budget, get_chat_model, with_structured_output
 from job_scout.tools.research import research_company
 
 _DESCRIPTION_LIMIT = 3000
+
+
+def _render_preferences(value: dict | CandidatePreferences | None) -> str:
+    """Render human-authored policy as explicit tailoring constraints."""
+    preferences = preferences_from_dict(value if value is not None else None)
+    start_min = preferences.target_start_min.isoformat() if preferences.target_start_min else "unknown"
+    start_max = preferences.target_start_max.isoformat() if preferences.target_start_max else "unknown"
+    return (
+        f"employment types: {', '.join(preferences.employment_types)}\n"
+        f"target start window: {start_min} to {start_max}\n"
+        f"country scope: {preferences.country_scope}; locations: {', '.join(preferences.locations) or 'anywhere in scope'}\n"
+        f"accepted work modes: {', '.join(preferences.accepted_work_modes)}\n"
+        f"primary role families: {', '.join(preferences.primary_role_families)}\n"
+        f"exclude internships: {preferences.exclude_internships}\n"
+        f"authorization: {preferences.authorization_status}; sponsorship: {preferences.sponsorship_policy}; "
+        f"clearance: {preferences.clearance_status}"
+    )
 
 
 def _render_job(ranked: RankedJob) -> str:
@@ -83,6 +100,7 @@ def tailor(state: AgentState) -> dict:
     prompt = TAILOR_PROMPT.format(
         research_rule=RESEARCH_RULE if research else "",
         profile=_render_profile(profile),
+        candidate_preferences=_render_preferences(state.get("candidate_preferences")),
         corpus=corpus.render_for_prompt(),
         job=_render_job(ranked),
         persona=resume_persona(ranked.job),
