@@ -110,6 +110,18 @@ Full chapter, including the demo script: [`docs/jobvis.md`](docs/jobvis.md).
 
 ## ✨ What's inside
 
+### Candidate-fit policy
+
+The Profile step now carries an editable target-search policy. The default
+candidate intent is full-time US roles starting December 2026 through March
+2027, with remote, hybrid, and onsite work accepted and AI/ML, Data Science,
+and GenAI treated as primary families. Internships, co-ops, explicit clearance
+requirements, and incompatible start dates are blocked or marked for review;
+BI, Java-heavy, and generic analyst roles remain visible separately as adjacent
+matches. See [docs/candidate-fit.md](docs/candidate-fit.md) for the design and
+[docs/adr/0001-candidate-policy-separation.md](docs/adr/0001-candidate-policy-separation.md)
+for the decision record.
+
 - **A four-step wizard** (Resume, Profile, Jobs, Tailor) with streamed progress and a per-run cost footer
 - **A voice console** with a Three.js orb that reacts to the real audio spectrum, live panels, and optional webcam hand control
 - **You decide where to search**: locations and remote are your call, not the model's guess
