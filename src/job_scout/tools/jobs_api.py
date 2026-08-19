@@ -49,6 +49,14 @@ class SearchResult:
     diagnostics: list[SourceDiagnostic] = field(default_factory=list)
 
 
+class _SourceFailure(list[JobPosting]):
+    """Empty source result carrying a diagnostic reason through the adapter boundary."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__()
+        self.reason = reason
+
+
 _COUNTRY_CODES: dict[str, str] = {
     "united states": "us", "usa": "us", "us": "us", "america": "us",
     "united kingdom": "gb", "uk": "gb", "england": "gb", "london": "gb",
@@ -83,7 +91,7 @@ def _failed(source: str, exc: Exception) -> list[JobPosting]:
     else:
         reason = type(exc).__name__
     logger.warning("job source %s returned no jobs: %s", source, reason)
-    return []
+    return _SourceFailure(reason)
 
 
 def location_to_country(location: str | None) -> str:
@@ -373,7 +381,12 @@ def run_search_detailed(
     fetchers: dict[str, Callable[[], list[JobPosting]]] = {}
     if jsearch.available:
         fetchers["jsearch"] = _tracked("jsearch", lambda: jsearch.fetch(query, location, country, remote, limit))
-    fetchers["adzuna"] = _tracked("adzuna", lambda: adzuna.fetch(query, location, country, remote, limit))
+    else:
+        diagnostics["jsearch"] = SourceDiagnostic(source="jsearch", requested=False, completed=True, error="not configured")
+    if adzuna.available:
+        fetchers["adzuna"] = _tracked("adzuna", lambda: adzuna.fetch(query, location, country, remote, limit))
+    else:
+        diagnostics["adzuna"] = SourceDiagnostic(source="adzuna", requested=False, completed=True, error="not configured")
     fetchers["remotive"] = _tracked("remotive", lambda: remotive.fetch(query, location, country, remote, limit))
 
     def _complete(name: str, found: list[JobPosting], error: str | None = None) -> None:
@@ -381,7 +394,13 @@ def run_search_detailed(
         diagnostic.completed = True
         diagnostic.returned = len(found)
         diagnostic.latency_ms = round((time.perf_counter() - started.get(name, time.perf_counter())) * 1000, 2)
-        diagnostic.error = error
+        failure_reason = getattr(found, "reason", None)
+        if not isinstance(failure_reason, str):
+            failure_reason = None
+        # An unavailable source is intentionally represented before the
+        # cascade starts. A later empty fetch attempt must not erase the
+        # diagnostic with ``None``.
+        diagnostic.error = error or failure_reason or diagnostic.error
 
     concurrent = get_settings().scout_concurrent_sources and len(fetchers) > 1
     pool: ThreadPoolExecutor | None = None
@@ -412,8 +431,10 @@ def run_search_detailed(
     else:
 
         def fetch(name: str, timeout: float | None = None) -> list[JobPosting]:
+            if name not in fetchers:
+                return []
             try:
-                found = fetchers[name]() if name in fetchers else []
+                found = fetchers[name]()
             except Exception as exc:  # noqa: BLE001 - a dead source is an empty source
                 _complete(name, [], f"{type(exc).__name__}: {exc}")
                 return []

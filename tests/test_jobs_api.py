@@ -119,6 +119,36 @@ def test_source_failure_names_a_rejected_key(respx_mock, caplog):
     assert "key rejected" in caplog.text
 
 
+def test_detailed_diagnostics_preserve_source_failure_reason(respx_mock):
+    respx_mock.get("https://api.openwebninja.com/jsearch/search-v2").mock(
+        return_value=httpx.Response(429, json={"error": {"message": "Too Many Requests"}})
+    )
+    result = run_search_detailed(
+        "data scientist",
+        jsearch=JSearchSource(api_key="k"),
+        adzuna=_fake_source("adzuna", []),
+        remotive=_fake_source("remotive", []),
+        cache=_fake_source("cache", []),
+    )
+    by_source = {item.source: item for item in result.diagnostics}
+    assert by_source["jsearch"].error == "HTTP 429 (quota exhausted)"
+    assert by_source["jsearch"].returned == 0
+
+
+def test_unconfigured_live_source_is_explicit_in_diagnostics():
+    result = run_search_detailed(
+        "data scientist",
+        jsearch=JSearchSource(api_key=""),
+        adzuna=AdzunaSource(app_id="", app_key=""),
+        remotive=_fake_source("remotive", []),
+        cache=_fake_source("cache", []),
+    )
+    by_source = {item.source: item for item in result.diagnostics}
+    assert by_source["jsearch"].requested is False
+    assert by_source["jsearch"].error == "not configured"
+    assert by_source["adzuna"].requested is False
+
+
 def test_jsearch_builds_location_query_and_maps_fields(respx_mock):
     payload = {
         "data": {
