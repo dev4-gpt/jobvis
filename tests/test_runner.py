@@ -15,7 +15,11 @@ from job_scout.runner import run_once, stream_search, stream_tailor
 class _FakeGraph:
     def __init__(self, values: dict | None = None):
         self.captured_inputs = None
+        self.updated_state = None
         self.values = values if values is not None else {"profile": None, "ranked_jobs": [], "jobs_sources": ["cache"]}
+
+    def update_state(self, config, values):
+        self.updated_state = values
 
     def stream(self, inputs, config, stream_mode):
         self.captured_inputs = inputs
@@ -40,6 +44,8 @@ def test_search_passes_profile_and_nulls_selected_job_id(monkeypatch, sample_pro
 
     assert fake.captured_inputs["profile"] is sample_profile
     assert fake.captured_inputs["selected_job_id"] is None
+    assert fake.updated_state["ranked_jobs"] == []
+    assert fake.updated_state["selected_job_id"] is None
 
 
 def test_stream_search_yields_result(monkeypatch, sample_profile):

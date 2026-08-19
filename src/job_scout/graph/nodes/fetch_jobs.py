@@ -165,7 +165,7 @@ def fetch_jobs(state: AgentState) -> dict:
         # Keep the provider-specific workaround at the boundary: the rest of
         # the graph still receives the same constrained search arguments.
         request_model = with_structured_output(
-            get_chat_model(model_name, temperature=0.0, reasoning_effort="none", timeout=60, max_retries=1),
+            get_chat_model(model_name, temperature=0.0, reasoning_effort="none", timeout=60, max_retries=3),
             SearchRequest,
             model_name,
         )

@@ -107,6 +107,28 @@ def stream_search(
     }
     config = {"configurable": {"thread_id": thread_id}, "callbacks": callbacks, "recursion_limit": 25}
 
+    # A failed provider call must not leave the previous search visible as if
+    # it belonged to this run. Clear search-owned checkpoint fields before the
+    # first model/source call; profile and candidate preferences are replaced
+    # by the invocation inputs below. This also makes a fresh search a clean
+    # handoff from the UI to the graph, rather than an append to stale state.
+    reset_search = {
+        "selected_job_id": None,
+        "jobs": [],
+        "ranked_jobs": [],
+        "search_query": None,
+        "jobs_sources": [],
+        "source_diagnostics": [],
+        "reformulation_count": 0,
+        "llm_calls": 0,
+        "errors": [],
+        "tailoring": None,
+        "fabrication_flags": 0,
+        "fabrication_report": None,
+        "cover_letter_quality": None,
+    }
+    graph.update_state(config, reset_search)
+
     result = RunResult(opik_url=opik_url(), profile=profile)
     start = time.monotonic()
     try:

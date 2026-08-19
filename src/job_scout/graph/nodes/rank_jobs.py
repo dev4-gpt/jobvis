@@ -95,7 +95,7 @@ def rank_jobs(state: AgentState) -> dict:
 
     model_kwargs = {}
     if settings.scout_model.startswith("groq:"):
-        model_kwargs = {"reasoning_effort": "none", "timeout": 60, "max_retries": 1}
+        model_kwargs = {"reasoning_effort": "none", "timeout": 60, "max_retries": 3}
     model = with_structured_output(
         get_chat_model(settings.scout_model, temperature=0.0, **model_kwargs), JobScores, settings.scout_model
     )
