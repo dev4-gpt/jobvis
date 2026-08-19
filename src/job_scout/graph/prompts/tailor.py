@@ -38,6 +38,9 @@ Candidate corpus:
 Target job:
 {job}
 
+Resume persona:
+{persona}
+
 Company research (may be empty):
 {research}
 """

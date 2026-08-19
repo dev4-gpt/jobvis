@@ -16,6 +16,7 @@ Guards never raise: a missing search state or an unknown job id is recorded in
 
 from __future__ import annotations
 
+from job_scout.candidate_fit import resume_persona
 from job_scout.config import get_settings
 from job_scout.corpus import build_corpus
 from job_scout.cover_letter_quality import evaluate_cover_letter
@@ -84,6 +85,7 @@ def tailor(state: AgentState) -> dict:
         profile=_render_profile(profile),
         corpus=corpus.render_for_prompt(),
         job=_render_job(ranked),
+        persona=resume_persona(ranked.job),
         research=research or "none",
     )
     pack: TailoringPack = model.invoke(prompt)
