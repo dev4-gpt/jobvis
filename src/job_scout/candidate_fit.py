@@ -9,9 +9,10 @@ overriding the candidate's choices.
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
-from job_scout.graph.schemas import CandidatePreferences, JobPosting, Profile
+if TYPE_CHECKING:
+    from job_scout.graph.schemas import CandidatePreferences, JobPosting, Profile
 
 _INTERNSHIP = re.compile(r"\b(intern(ship)?|co[- ]?op|student|summer analyst|research intern)\b", re.I)
 _PART_TIME = re.compile(r"\b(part[- ]?time|temporary|seasonal|volunteer)\b", re.I)
@@ -54,11 +55,15 @@ class EligibilityAssessment(NamedTuple):
 
 def default_preferences() -> CandidatePreferences:
     """Return the product's explicit default policy for a new candidate."""
+    from job_scout.graph.schemas import CandidatePreferences
+
     return CandidatePreferences()
 
 
 def preferences_from_dict(value: dict | CandidatePreferences | None) -> CandidatePreferences:
     """Validate persisted preferences while retaining safe defaults for v1 data."""
+    from job_scout.graph.schemas import CandidatePreferences
+
     if isinstance(value, CandidatePreferences):
         return value
     if not value:
