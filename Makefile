@@ -84,7 +84,7 @@ queue: ## Create the Opik annotation queue + feedback definitions
 
 .PHONY: jobvis-agent
 jobvis-agent: ## Create/update the Jobvis ElevenLabs agent (prints the agent id)
-	uv run python scripts/setup_jobvis_agent.py
+	$(UV_RUN) python scripts/setup_jobvis_agent.py
 
 .PHONY: test
 test: ## Run the test suite

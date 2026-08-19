@@ -339,7 +339,11 @@ def test_event_stream_state_frame_carries_the_panels(bridge, monkeypatch, sample
     bridge.register_thread("t1")
     bridge.record_profile(sample_profile, "cv text", "t1")
     jobs = [RankedJob(job=make_job("j1", "Data Scientist", "Acme"), fit_score=91, fit_explanation="fits")]
-    monkeypatch.setattr(bridge_module, "checkpoint_values", lambda thread_id: {"ranked_jobs": jobs})
+    monkeypatch.setattr(
+        bridge_module,
+        "checkpoint_values",
+        lambda thread_id: {"jobs": [make_job("j1", "Data Scientist", "Acme")], "ranked_jobs": jobs},
+    )
 
     async def go() -> str:
         gen = api_module.event_stream(_never_disconnected, poll=0.01)
@@ -350,6 +354,7 @@ def test_event_stream_state_frame_carries_the_panels(bridge, monkeypatch, sample
     payload = json.loads(asyncio.run(go()).split("data: ", 1)[1])
     assert payload["candidate"]["name"] == "Test Candidate"
     assert payload["jobs"][0]["title"] == "Data Scientist"
+    assert payload["source_coverage"]["sources"] == ["cache"]
 
 
 def test_event_stream_stops_when_the_console_disconnects(bridge):

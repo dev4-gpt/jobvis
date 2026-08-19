@@ -175,10 +175,18 @@ TOOL_SPECS: list[dict] = [
         "name": "start_search",
         "description": (
             "Start the job search for the uploaded CV. Returns immediately; the search runs in the background for "
-            "about a minute and the ranked results appear on screen by themselves."
+            "about a minute and the ranked results appear on screen by themselves. Set fresh true only when the "
+            "user explicitly asks to run a new search; never set it for a retry or status check."
         ),
         "wait_for_response": True,
-        "parameters": [],
+        "parameters": [
+            {
+                "name": "fresh",
+                "type": "boolean",
+                "required": False,
+                "description": "true only for an explicit request to run a fresh search; otherwise omit or use false.",
+            }
+        ],
     },
     {
         "name": "start_tailoring",

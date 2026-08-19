@@ -180,7 +180,9 @@ def current_state() -> dict:
             "primary": len(primary),
             "adjacent": len(adjacent),
             "blocked_or_review": len(blocked),
-            "sources": sorted({job.job.source for job in values.get("jobs") or []}),
+            # ``jobs`` is the raw fetch output (``JobPosting`` objects); the
+            # ranked output below is the separate ``RankedJob`` collection.
+            "sources": sorted({job.source for job in values.get("jobs") or []}),
         },
         "pack": _pack_payload(values),
         "run": bridge.run_status(),

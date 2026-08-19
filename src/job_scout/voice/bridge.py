@@ -132,11 +132,32 @@ class VoiceBridge:
         with self._lock:
             return self._run is not None and not self._run.done
 
-    def start_search(self) -> str | None:
-        """Kick a background search; returns a speakable refusal, or None on start."""
+    def start_search(self, *, fresh: bool = False) -> str | None:
+        """Kick a background search, guarding against voice-agent retries.
+
+        ElevenLabs may retry a client tool after the model has already spoken
+        its acknowledgement. A successful completed search is therefore
+        idempotent by default; only an explicit ``fresh`` request may launch
+        another search over the same session.
+        """
         snap = self.snapshot()
         if snap.profile is None or not snap.cv_text:
             return "No profile yet — the user needs to drop their CV (a PDF) into the app first."
+        with self._lock:
+            previous = self._run
+            if (
+                not fresh
+                and previous is not None
+                and previous.kind == "search"
+                and previous.done
+                and not previous.failed
+                and previous.search_result is not None
+                and bool(previous.search_result.ranked_jobs)
+            ):
+                return (
+                    "The current search has finished and its results are already on screen. "
+                    "I will not start it again unless you explicitly ask for a fresh search."
+                )
         return self._launch("search", lambda run: self._drive_search(snap, run))
 
     def start_tailoring(self, selected_job_id: str) -> str | None:

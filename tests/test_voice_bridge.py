@@ -82,6 +82,12 @@ def test_search_run_completes_and_pops_once(monkeypatch, sample_profile):
     assert run is not None and run.search_result is result
     assert bridge.pop_finished_run() is None  # the pop hands over exactly once
 
+    refusal = bridge.start_search()
+    assert refusal is not None and "already on screen" in refusal
+
+    assert bridge.start_search(fresh=True) is None
+    assert wait_until(lambda: bridge.run_status()["done"])
+
 
 def test_second_run_refused_while_busy(monkeypatch, sample_profile):
     release = threading.Event()

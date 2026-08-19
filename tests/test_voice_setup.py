@@ -55,6 +55,9 @@ def test_tool_payload_parameter_schema():
     assert tool["parameters"]["required"] == ["job_ref"]
 
 
-def test_parameterless_tools_omit_schema():
+def test_start_search_exposes_only_an_explicit_fresh_flag():
     spec = next(s for s in TOOL_SPECS if s["name"] == "start_search")
-    assert "parameters" not in setup_script.build_tool_payload(spec)
+    params = setup_script.build_tool_payload(spec)["parameters"]
+    assert params["type"] == "object"
+    assert params["properties"]["fresh"]["type"] == "boolean"
+    assert params["required"] == []

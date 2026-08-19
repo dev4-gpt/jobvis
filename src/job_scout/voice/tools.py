@@ -148,7 +148,9 @@ def read_application(parameters: dict | None = None) -> dict:
 
 def start_search(parameters: dict | None = None) -> dict:
     """Fire-and-forget job search on the wizard's thread."""
-    refusal = _bridge.get_bridge().start_search()
+    raw = parameters or {}
+    fresh = bool(raw.get("fresh") or raw.get("refresh"))
+    refusal = _bridge.get_bridge().start_search(fresh=fresh)
     if refusal:
         return {"started": False, "note": refusal}
     return {
