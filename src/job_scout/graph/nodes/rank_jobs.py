@@ -10,6 +10,7 @@ import contextvars
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 
+from job_scout.candidate_fit import assess_eligibility, normalize_job, preferences_from_dict
 from job_scout.config import get_settings
 from job_scout.graph.prompts.rank_jobs import RANK_JOBS_PROMPT
 from job_scout.graph.schemas import JobPosting, JobScores, Profile, RankedJob
@@ -24,6 +25,10 @@ MAX_PARALLEL_BATCHES = 4
 
 def _render_profile(profile: Profile) -> str:
     """Format the profile as plain text for the ranking prompt."""
+    education = (
+        ", ".join(entry.degree + " " + entry.field + " at " + entry.institution for entry in profile.education_history)
+        or "unknown"
+    )
     return (
         f"Name: {profile.name}\n"
         f"Seniority: {profile.seniority}\n"
@@ -32,19 +37,27 @@ def _render_profile(profile: Profile) -> str:
         f"Years experience: {profile.years_experience}\n"
         f"Locations: {', '.join(profile.locations)}\n"
         f"Remote ok: {profile.remote_ok}"
+        f"\nEducation: {education}"
+        f"\nExpected graduation: {profile.expected_graduation_date or 'unknown'}"
+        f"\nCurrent program: {profile.current_program or 'unknown'}"
     )
 
 
 def _render_jobs(jobs: list[JobPosting]) -> str:
     """Format a batch of jobs as plain text for the ranking prompt."""
-    return "\n\n---\n\n".join(
-        f"job_id: {job.job_id}\n"
-        f"title: {job.title}\n"
-        f"company: {job.company}\n"
-        f"location: {job.location} (remote: {job.remote})\n"
-        f"description: {job.description[:1500]}"
-        for job in jobs
-    )
+    rendered = []
+    for job in jobs:
+        rendered.append(
+            f"job_id: {job.job_id}\n"
+            f"title: {job.title}\n"
+            f"company: {job.company}\n"
+            f"location: {job.location} (remote: {job.remote})\n"
+            f"employment: {job.employment_type}; work mode: {job.work_mode}; level: {job.experience_level}\n"
+            f"clearance required: {job.clearance_required}; authorization: {job.authorization_requirement}; "
+            f"start: {job.start_date_text or 'unknown'}\n"
+            f"description: {job.description[:1500]}"
+        )
+    return "\n\n---\n\n".join(rendered)
 
 
 def _batches(items: list[JobPosting], size: int) -> Iterator[list[JobPosting]]:
@@ -109,15 +122,53 @@ def rank_jobs(state: AgentState) -> dict:
             job = by_id.get(score.job_id)
             if job is None:
                 continue
-            ranked.append(
-                RankedJob(
-                    job=job,
-                    fit_score=score.fit_score,
-                    fit_explanation=score.fit_explanation,
-                    matched_skills=score.matched_skills,
-                    gaps=score.gaps,
+            normalized = normalize_job(job)
+            if state.get("candidate_preferences") is not None:
+                preferences = preferences_from_dict(state.get("candidate_preferences"))
+                assessment = assess_eligibility(
+                    normalized,
+                    profile,
+                    preferences,
+                    role_fit_score=score.role_fit_score or score.fit_score,
+                    evidence_fit_score=score.evidence_fit_score or _evidence_score(score),
                 )
-            )
+                ranked.append(
+                    RankedJob(
+                        job=normalized,
+                        fit_score=assessment.final_priority_score,
+                        final_priority_score=assessment.final_priority_score,
+                        role_fit_score=assessment.role_fit_score,
+                        evidence_fit_score=assessment.evidence_fit_score,
+                        eligibility_status=assessment.status,
+                        eligibility_reasons=assessment.reasons,
+                        hard_blockers=assessment.hard_blockers,
+                        primary_or_adjacent=assessment.role_bucket,
+                        start_timing_fit=assessment.start_timing_fit,
+                        fit_explanation=score.fit_explanation,
+                        matched_skills=score.matched_skills,
+                        gaps=score.gaps,
+                    )
+                )
+            else:
+                ranked.append(
+                    RankedJob(
+                        job=normalized,
+                        fit_score=score.fit_score,
+                        final_priority_score=score.fit_score,
+                        role_fit_score=score.fit_score,
+                        evidence_fit_score=_evidence_score(score),
+                        fit_explanation=score.fit_explanation,
+                        matched_skills=score.matched_skills,
+                        gaps=score.gaps,
+                    )
+                )
 
-    ranked.sort(key=lambda r: r.fit_score, reverse=True)
+    ranked.sort(key=lambda r: (r.eligibility_status == "blocked", r.primary_or_adjacent != "primary", -r.fit_score))
     return {"ranked_jobs": ranked, "llm_calls": calls}
+
+
+def _evidence_score(score) -> int:
+    """Approximate evidence fit from explicit matches/gaps when the model emits no breakdown."""
+    matches = len(score.matched_skills)
+    gaps = len(score.gaps)
+    return max(0, min(100, 55 + matches * 8 - gaps * 4))
