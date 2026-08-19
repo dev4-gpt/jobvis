@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
 from job_scout.config import get_settings
 from job_scout.graph import get_compiled_graph
@@ -43,6 +45,8 @@ def health() -> dict[str, object]:
     return {
         "status": "ok",
         "graph": type(graph).__name__,
+        "python": sys.executable,
+        "source_root": str(Path(__file__).resolve().parents[2]),
         "model": model,
         "opik_enabled": settings.opik_enabled,
         "has_llm_key": bool(readiness["scout"]["ready"]),
