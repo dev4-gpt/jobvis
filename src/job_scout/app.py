@@ -18,6 +18,7 @@ whispers a screen event to whoever is listening on the console.
 from __future__ import annotations
 
 import re
+import socket
 import tempfile
 from html import escape, unescape
 from pathlib import Path
@@ -1289,9 +1290,25 @@ def main() -> None:
     """
     from job_scout.api import CONSOLE_PORT, WIZARD_PORT, serve_in_thread
 
+    if WIZARD_PORT == CONSOLE_PORT:
+        raise RuntimeError(f"Jobvis wizard and console must use different ports, got :{WIZARD_PORT} for both")
+    _assert_port_available(WIZARD_PORT, "wizard")
+    _assert_port_available(CONSOLE_PORT, "console")
     serve_in_thread()
     print(f"Jobvis console: http://localhost:{CONSOLE_PORT}")
     build_app().launch(server_name="127.0.0.1", server_port=WIZARD_PORT, theme=THEME, css=CSS)
+
+
+def _assert_port_available(port: int, surface: str) -> None:
+    """Fail before starting either server when a local port is occupied."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as exc:
+            raise RuntimeError(
+                f"Jobvis {surface} cannot start: port :{port} is already in use. "
+                "Run `make stop` for Jobvis listeners or choose another configured port."
+            ) from exc
 
 
 if __name__ == "__main__":

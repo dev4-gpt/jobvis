@@ -24,21 +24,35 @@ setup: ## Install deps and pre-commit hooks
 	uv run pre-commit install
 
 .PHONY: app
-app: preflight ## Launch both surfaces: wizard on configured port and console on configured port
+app: preflight port-check ## Launch both surfaces: wizard on configured port and console on configured port
 	$(JOBVIS_WIZARD_ENV) $(JOBVIS_CONSOLE_ENV) $(UV_RUN) python -m job_scout.app
 
 .PHONY: preflight
 preflight: ## Validate imports, graph compilation, and model-role configuration before launch
 	$(UV_RUN) python -m job_scout.health
 
+.PHONY: port-check
+port-check: ## Fail clearly if either configured Jobvis port is already occupied
+	@for port in $(WIZARD_PORT) $(CONSOLE_PORT); do \
+		pids="$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null || true)"; \
+		if [ -n "$$pids" ]; then \
+			echo "Jobvis cannot start: port :$$port is already in use (PID(s): $$pids). Run 'make WIZARD_PORT=$(WIZARD_PORT) CONSOLE_PORT=$(CONSOLE_PORT) stop' or choose different ports."; \
+			exit 1; \
+		fi; \
+	done
+
 .PHONY: stop
 stop: ## Stop only local listeners occupying the configured Jobvis ports
 	@for port in $(WIZARD_PORT) $(CONSOLE_PORT); do \
 		pids="$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null || true)"; \
-		if [ -n "$$pids" ]; then \
-			echo "Stopping Jobvis listener(s) on :$$port: $$pids"; \
-			kill $$pids; \
-		else \
+		for pid in $$pids; do \
+			command="$$(ps -p $$pid -o command= 2>/dev/null || true)"; \
+			case "$$command" in \
+				*job_scout.app*) echo "Stopping Jobvis listener on :$$port (PID $$pid)"; kill $$pid ;; \
+				*) echo "Leaving non-Jobvis process on :$$port (PID $$pid): $$command" ;; \
+			esac; \
+		done; \
+		if [ -z "$$pids" ]; then \
 			echo "No listener on :$$port"; \
 		fi; \
 	done
