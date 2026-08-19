@@ -97,6 +97,10 @@ make stop             # stop local Jobvis listeners before restarting
 make app              # wizard on :7860 AND the console on :8000, one process
 ```
 
+If another local service already uses port 8000, set
+`JOBVIS_CONSOLE_PORT=8001` in `.env` and open the console at
+`http://localhost:8001`. The wizard remains on `http://localhost:7860`.
+
 The conversation runs in your **browser** over WebRTC, which is what buys real barge-in and the browser's own echo cancellation, with no audio library to build. Your key never leaves Python: the page asks for a short-lived session token and nothing more.
 
 The grounding contract from Part 2 carries into the new modality. The browser forwards every question and never answers one, so the voice can only say what the LangGraph checkpoint returns. Watch the tool calls appear in the transcript panel as it talks.

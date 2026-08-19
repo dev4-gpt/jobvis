@@ -1040,6 +1040,7 @@ def reset():
 def build_app() -> gr.Blocks:
     """Build the four-step wizard app."""
     register_prompts()
+    from job_scout.api import CONSOLE_PORT
 
     with gr.Blocks(title="Job Scout") as demo:
         thread_id = gr.State(lambda: str(uuid4()))
@@ -1056,7 +1057,8 @@ def build_app() -> gr.Blocks:
         if voice_ok:
             gr.HTML(
                 '<div id="jv-strip"><span class="jv-hint">Jobvis, the voice concierge, runs in its own console.</span>'
-                '<a class="jv-link" href="http://localhost:8000" target="_blank" rel="noopener">Talk to Jobvis ↗</a></div>'
+                f'<a class="jv-link" href="http://localhost:{CONSOLE_PORT}" '
+                'target="_blank" rel="noopener">Talk to Jobvis ↗</a></div>'
             )
         else:
             gr.HTML(f'<p class="jv-hint">{escape(voice_hint)}</p>')

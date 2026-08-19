@@ -471,7 +471,9 @@ def create_app() -> FastAPI:
     return app
 
 
-CONSOLE_PORT = 8000
+# The default matches the documented local setup.  Keep this configurable so
+# Jobvis can coexist with another local service that already owns :8000.
+CONSOLE_PORT = int(os.getenv("JOBVIS_CONSOLE_PORT", "8000"))
 
 
 def serve_in_thread(port: int = CONSOLE_PORT) -> None:
