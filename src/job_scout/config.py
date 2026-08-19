@@ -17,6 +17,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # from subdirectories (e.g. notebooks/) still find it. A CWD-local .env, when
 # present, is read second and wins.
 _REPO_ENV = Path(__file__).resolve().parents[2] / ".env"
+_MODEL_PROVIDERS = {"openai", "groq", "nvidia", "ollama"}
+_RETIRED_MODELS = {
+    "llama-3.3-70b-versatile": "groq:openai/gpt-oss-20b",
+    "qwen/qwen3.5-397b-a17b": "groq:qwen/qwen3.6-27b",
+}
 
 
 class Settings(BaseSettings):
@@ -62,6 +67,8 @@ class Settings(BaseSettings):
     scout_fetch_model: str = Field(default="", alias="SCOUT_FETCH_MODEL")
     scout_rank_batch: int = Field(default=4, alias="SCOUT_RANK_BATCH")
     scout_rank_timeout: float = Field(default=45.0, alias="SCOUT_RANK_TIMEOUT")
+    scout_max_role_queries: int = Field(default=6, alias="SCOUT_MAX_ROLE_QUERIES")
+    scout_query_concurrency: int = Field(default=3, alias="SCOUT_QUERY_CONCURRENCY")
     scout_concurrent_sources: bool = Field(default=True, alias="SCOUT_CONCURRENT_SOURCES")
     # 1.0s is measured, not guessed. The deadline is paid in full on every
     # search (adzuna is already finished by ~1s, so wall clock == deadline),
@@ -103,6 +110,31 @@ class Settings(BaseSettings):
             if value.startswith("#"):
                 return ""
         return value
+
+    @field_validator("scout_model", "scout_tailor_model", "scout_fetch_model", mode="after")
+    @classmethod
+    def _validate_model_reference(cls, value: str, info) -> str:
+        """Reject malformed or known-retired model references before a run starts."""
+        model = value.strip()
+        if not model:
+            return ""
+        if ":" not in model:
+            raise ValueError(
+                f"{info.field_name} must use provider:model syntax, for example groq:openai/gpt-oss-20b or ollama:qwen3.5:4b"
+            )
+        provider, model_id = model.split(":", 1)
+        if provider not in _MODEL_PROVIDERS:
+            raise ValueError(
+                f"{info.field_name} uses unsupported provider {provider!r}; choose one of {', '.join(sorted(_MODEL_PROVIDERS))}"
+            )
+        retired_hint = _RETIRED_MODELS.get(model_id.lower())
+        if retired_hint:
+            raise ValueError(
+                f"{info.field_name} references retired model {model_id!r}; use {retired_hint!r} or another current model"
+            )
+        if not model_id.strip():
+            raise ValueError(f"{info.field_name} has an empty model id after {provider}:")
+        return model
 
     @property
     def has_jsearch(self) -> bool:

@@ -28,6 +28,13 @@ PRIMARY_FAMILY_TERMS = {
     "ai_ml": ("machine learning", "ml engineer", "ai engineer", "ai/ml", "applied ml", "deep learning"),
     "data_science": ("data scientist", "data science", "applied scientist", "decision scientist"),
     "genai": ("genai", "generative ai", "llm", "rag", "language model", "prompt engineer"),
+    "forward_deployed": (
+        "forward deployed",
+        "forward-deployed",
+        "solutions engineer",
+        "customer engineer",
+        "deployment engineer",
+    ),
     "computer_vision": ("computer vision", "vision engineer", "perception engineer"),
     "mlops": ("mlops", "ml platform", "machine learning platform"),
 }
@@ -151,6 +158,11 @@ def role_bucket(job: JobPosting, preferences: CandidatePreferences) -> str:
 def resume_persona(job: JobPosting) -> str:
     """Choose which evidence should lead the tailored resume."""
     text = f"{job.title} {job.description}".lower()
+    if any(term in text for term in ("forward deployed", "forward-deployed", "solutions engineer", "customer engineer")):
+        return (
+            "Forward-Deployed AI: lead with Veloce AgenticOS, agentic orchestration, research systems, "
+            "and evidence of turning technical systems into usable products for stakeholders."
+        )
     if any(term in text for term in ("rag", "llm", "generative ai", "genai", "language model")):
         return "GenAI/RAG and AI Engineering: lead with the legal document analyzer and agentic orchestration evidence."
     if any(term in text for term in ("computer vision", "vision", "perception", "yolo")):

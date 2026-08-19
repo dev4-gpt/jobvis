@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from job_scout.candidate_fit import assess_eligibility, normalize_job, preferences_from_dict, role_bucket
+from job_scout.candidate_fit import assess_eligibility, normalize_job, preferences_from_dict, resume_persona, role_bucket
 from job_scout.graph.schemas import CandidatePreferences, EducationEntry, JobPosting, Profile
 
 
@@ -104,3 +104,9 @@ def test_legacy_preferences_get_safe_new_defaults():
     assert prefs.locations == ["Philadelphia"]
     assert prefs.exclude_internships is True
     assert prefs.authorization_status == "unknown"
+
+
+def test_forward_deployed_is_a_primary_portfolio_fit():
+    job = normalize_job(_job("Forward Deployed Engineer", "Full-time role deploying AI systems with customers."))
+    assert role_bucket(job, CandidatePreferences()) == "primary"
+    assert "Veloce AgenticOS" in resume_persona(job)

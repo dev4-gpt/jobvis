@@ -9,7 +9,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import job_scout.runner as runner_mod
-from job_scout.runner import run_once, stream_search, stream_tailor
+from job_scout.runner import _friendly_provider_error, run_once, stream_search, stream_tailor
 
 
 class _FakeGraph:
@@ -72,3 +72,13 @@ def test_stream_tailor_passes_only_selection_inputs(monkeypatch):
     assert result.fabrication_flags == 2
     assert result.errors == ["e"]
     assert result.failed is False
+
+
+def test_provider_errors_are_actionable_without_exposing_raw_provider_payload():
+    message = _friendly_provider_error(RuntimeError("Error code: 410 model reached end of life"))
+    assert "configured model is unavailable or retired" in message.lower()
+    assert "SCOUT_MODEL" in message
+
+    rate_limit = _friendly_provider_error(RuntimeError("429 rate_limit_exceeded"))
+    assert "rate-limited" in rate_limit
+    assert "reduce SCOUT_MAX_JOBS" in rate_limit

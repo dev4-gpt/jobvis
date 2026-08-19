@@ -66,7 +66,7 @@ class CandidatePreferences(BaseModel):
     country_scope: str = "us"
     locations: list[str] = Field(default_factory=list)
     accepted_work_modes: list[str] = Field(default_factory=lambda: ["remote", "hybrid", "onsite"])
-    primary_role_families: list[str] = Field(default_factory=lambda: ["ai_ml", "data_science", "genai"])
+    primary_role_families: list[str] = Field(default_factory=lambda: ["ai_ml", "data_science", "genai", "forward_deployed"])
     adjacent_role_policy: str = "show_separately"
     authorization_status: str = "unknown"
     sponsorship_policy: str = "unknown"

@@ -7,6 +7,9 @@ reformulation loop the reformulated query is passed as guidance for a fresh call
 
 from __future__ import annotations
 
+import contextvars
+from concurrent.futures import ThreadPoolExecutor
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from job_scout.candidate_fit import preferences_from_dict
@@ -63,11 +66,13 @@ _ROLE_QUERIES = (
     ("genai", "GenAI Engineer"),
     ("genai", "LLM RAG Engineer"),
     ("mlops", "Junior MLOps Engineer"),
+    ("forward_deployed", "Forward Deployed Engineer"),
+    ("forward_deployed", "Solutions Engineer"),
     ("computer_vision", "Computer Vision Engineer"),
 )
 
 
-def _candidate_queries(profile, preferences: CandidatePreferences, reformulation_count: int) -> list[str]:
+def _candidate_queries(profile, preferences: CandidatePreferences, reformulation_count: int, max_queries: int = 6) -> list[str]:
     """Build bounded title-only queries from the human-selected role families."""
     families = set(preferences.primary_role_families)
     queries = [query for family, query in _ROLE_QUERIES if family in families]
@@ -77,7 +82,7 @@ def _candidate_queries(profile, preferences: CandidatePreferences, reformulation
         # A reformulation pass broadens via the remaining title families rather
         # than inventing a skill soup or relaxing the candidate's policy.
         queries = queries[reformulation_count % len(queries) :] + queries[: reformulation_count % len(queries)]
-    return list(dict.fromkeys(queries))[:6]
+    return list(dict.fromkeys(queries))[: max(1, max_queries)]
 
 
 def _build_prompt(state: AgentState) -> str:
@@ -113,19 +118,40 @@ def fetch_jobs(state: AgentState) -> dict:
     raw_preferences = state.get("candidate_preferences")
     if raw_preferences is not None:
         preferences = preferences_from_dict(raw_preferences if isinstance(raw_preferences, dict) else raw_preferences)
-        query_list = _candidate_queries(profile, preferences, state.get("reformulation_count", 0))
+        query_list = _candidate_queries(
+            profile,
+            preferences,
+            state.get("reformulation_count", 0),
+            max_queries=getattr(settings, "scout_max_role_queries", 6),
+        )
         all_jobs: list[JobPosting] = []
         all_sources: list[str] = []
         diagnostics_by_source: dict[str, SourceDiagnostic] = {}
-        for query in query_list:
+
+        def search_role(query: str):
             location, country = _authoritative_location(profile)
-            search = run_search(
+            return run_search(
                 query=query,
                 location=location,
                 country=country,
                 remote="remote" in preferences.accepted_work_modes,
                 limit=max(3, settings.scout_max_jobs // 2),
             )
+
+        # Role-family searches are independent. Keep the fan-out bounded so a
+        # broad candidate policy is fast without creating an unbounded thread
+        # or API-request storm. copy_context preserves the active Opik span.
+        concurrency = max(1, min(getattr(settings, "scout_query_concurrency", 3), len(query_list)))
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = [pool.submit(contextvars.copy_context().run, search_role, query) for query in query_list]
+            searches = []
+            for query, future in zip(query_list, futures, strict=True):
+                try:
+                    searches.append((query, future.result()))
+                except Exception as exc:  # noqa: BLE001 - one role family must not kill the whole search
+                    errors.append(f"fetch_jobs: role query {query!r} failed: {type(exc).__name__}: {exc}")
+
+        for _query, search in searches:
             if isinstance(search, tuple):
                 jobs, sources = search
                 diagnostics = []
@@ -145,7 +171,10 @@ def fetch_jobs(state: AgentState) -> dict:
                     current.contributed = current.contributed or diagnostic.contributed
                     if diagnostic.error:
                         current.error = diagnostic.error
-        jobs = _dedupe_with_existing(state.get("jobs", []), all_jobs)[:MERGED_CEILING]
+        # SCOUT_MAX_JOBS is the total ranking budget, not a per-query budget.
+        # Enforcing it here prevents a six-query fan-out from unexpectedly
+        # becoming 25 ranking candidates and making the UI look hung.
+        jobs = _dedupe_with_existing(state.get("jobs", []), all_jobs)[: max(1, settings.scout_max_jobs)]
         return {
             "jobs": jobs,
             "search_query": " | ".join(query_list),

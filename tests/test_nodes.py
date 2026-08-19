@@ -130,9 +130,40 @@ def test_fetch_jobs_uses_role_family_fanout_for_candidate_preferences(monkeypatc
     monkeypatch.setattr(fetch_mod, "run_search", fake_run_search)
     prefs = CandidatePreferences(country_scope="us", primary_role_families=["ai_ml", "genai"])
     out = fetch_jobs({"profile": sample_profile, "candidate_preferences": prefs, "llm_calls": 0})
-    assert queries == ["Applied ML Engineer", "AI/ML Engineer", "GenAI Engineer", "LLM RAG Engineer"]
+    assert set(queries) == {"Applied ML Engineer", "AI/ML Engineer", "GenAI Engineer", "LLM RAG Engineer"}
     assert out["llm_calls"] == 0
     assert len(out["jobs"]) == 4
+
+
+def test_candidate_role_fanout_honors_global_job_cap(monkeypatch, sample_profile, sample_jobs):
+    """Multiple role queries must not bypass the ranking budget."""
+
+    def fake_run_search(query, location, country, remote, limit):
+        return [
+            sample_jobs[0].model_copy(
+                update={"job_id": f"{query}-{i}", "title": f"{query} {i}", "url": f"https://example.com/{query}/{i}"}
+            )
+            for i in range(3)
+        ], ["cache"]
+
+    monkeypatch.setattr(fetch_mod, "run_search", fake_run_search)
+    monkeypatch.setattr(
+        fetch_mod,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "scout_max_jobs": 6,
+                "scout_max_role_queries": 6,
+                "scout_query_concurrency": 2,
+                "max_llm_calls_per_run": 25,
+            },
+        )(),
+    )
+    prefs = CandidatePreferences(country_scope="us", primary_role_families=["ai_ml", "genai"])
+    out = fetch_jobs({"profile": sample_profile, "candidate_preferences": prefs, "llm_calls": 0})
+    assert len(out["jobs"]) == 6
 
 
 def test_rank_jobs_batches_by_five(monkeypatch, sample_profile):

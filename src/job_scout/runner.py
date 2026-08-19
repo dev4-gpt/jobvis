@@ -63,6 +63,30 @@ class RunResult:
     error_message: str = ""
 
 
+def _friendly_provider_error(exc: Exception) -> str:
+    """Turn provider failures into an actionable message for the UI."""
+    text = str(exc)
+    lowered = text.lower()
+    if "rate limit" in lowered or "rate_limit" in lowered or "429" in lowered:
+        return (
+            "The model provider rate-limited this run. Wait for the provider window to reset, "
+            "reduce SCOUT_MAX_JOBS/SCOUT_MAX_ROLE_QUERIES, or choose another configured provider."
+        )
+    if "404" in lowered or "notfound" in lowered or "not found" in lowered or "410" in lowered or "end of life" in lowered:
+        return (
+            "The configured model is unavailable or retired. Check SCOUT_MODEL, "
+            "SCOUT_FETCH_MODEL, and SCOUT_TAILOR_MODEL in .env; use provider:model syntax and restart Jobvis."
+        )
+    if "reasoning_effort" in lowered or "tool_use_failed" in lowered or "function-calling" in lowered:
+        return (
+            "The provider rejected this model request format. Choose a supported model for the selected provider "
+            "or switch the role to another configured provider."
+        )
+    if "timeout" in lowered or "timed out" in lowered:
+        return "The model provider timed out. Reduce SCOUT_MAX_JOBS or SCOUT_RANK_BATCH, or choose a faster model."
+    return text
+
+
 def _estimate_cost(usage: dict, model: str) -> float:
     """Estimate USD cost from token usage, for the footer (Opik has the exact figure)."""
     in_price, out_price = _PRICES_PER_MTOK.get(model.split(":", 1)[-1], (0.0, 0.0))
@@ -148,7 +172,7 @@ def stream_search(
         result.errors = final.get("errors", [])
     except Exception as exc:  # noqa: BLE001 - report as a failed run, keep the trace
         result.failed = True
-        result.error_message = f"{type(exc).__name__}: {exc}"
+        result.error_message = f"{type(exc).__name__}: {_friendly_provider_error(exc)}"
     finally:
         result.latency_s = round(time.monotonic() - start, 2)
         result.cost_usd = _estimate_cost(usage_cb.usage_metadata, settings.scout_model)
@@ -217,7 +241,7 @@ def stream_tailor(
         result.errors = final.get("errors", [])
     except Exception as exc:  # noqa: BLE001 - report as a failed run, keep the trace
         result.failed = True
-        result.error_message = f"{type(exc).__name__}: {exc}"
+        result.error_message = f"{type(exc).__name__}: {_friendly_provider_error(exc)}"
     finally:
         result.latency_s = round(time.monotonic() - start, 2)
         result.cost_usd = _estimate_cost(usage_cb.usage_metadata, settings.scout_tailor_model)
