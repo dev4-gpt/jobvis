@@ -12,8 +12,9 @@ human hands.
 3. Log in, complete MFA, solve CAPTCHA, or create an account yourself.
 4. Review the proposed field mapping. It contains confidence, provenance, and
    a sensitivity flag.
-5. Approve safe fields. Jobvis may fill those fields and upload the tailored CV
-   and cover letter when PDFs are available.
+5. Approve safe fields. Each file upload is its own approval: approving a name,
+   email, or other text field never implicitly uploads the tailored CV or cover
+   letter. Approved upload fields receive the matching PDFs when available.
 6. Sensitive, ambiguous, and unknown questions pause for an answer. The
    resume is never used to guess an ambiguous response.
 7. Jobvis stops at the final review page. There is no submit method or submit

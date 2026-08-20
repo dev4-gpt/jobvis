@@ -11,6 +11,7 @@ from pypdf.annotations import Link
 
 from job_scout.application.answers import AnswerMemory
 from job_scout.application.ats import ApplicantFacts, ATSName, discover_fields, propose_mappings
+from job_scout.application.browser import VisibleApplicationBrowser
 from job_scout.application.controller import ApplicationController
 from job_scout.cover_letter_quality import (
     evaluate_cover_letter,
@@ -179,3 +180,43 @@ def test_application_controller_has_no_submit_operation():
     controller = ApplicationController()
     assert not hasattr(controller, "submit")
     assert not hasattr(controller.browser, "submit")
+
+
+def test_file_uploads_require_individual_approval(tmp_path):
+    class FakeLocator:
+        def __init__(self):
+            self.filled: list[str] = []
+            self.uploaded: list[str] = []
+
+        def fill(self, value: str):
+            self.filled.append(value)
+
+        def set_input_files(self, value: str):
+            self.uploaded.append(value)
+
+    class FakePage:
+        def __init__(self):
+            self.locators: dict[str, FakeLocator] = {}
+
+        def locator(self, selector: str):
+            return self.locators.setdefault(selector, FakeLocator())
+
+    inspection = discover_fields(
+        "https://boards.greenhouse.io/acme/jobs/1",
+        """
+        <form>
+          <label for="name">Full name</label><input id="name" name="name">
+          <label for="resume">Resume</label><input id="resume" name="resume" type="file">
+        </form>
+        """,
+    )
+    browser = VisibleApplicationBrowser(state_path=tmp_path / "state.enc")
+    browser._page = FakePage()
+    resume = tmp_path / "tailored_cv.pdf"
+    resume.write_bytes(b"pdf")
+
+    browser.fill_safe_fields(inspection, {"name"}, {"resume": resume})
+    assert browser._page.locators.get("#resume") is None
+
+    browser.fill_safe_fields(inspection, {"resume"}, {"resume": resume})
+    assert browser._page.locators["#resume"].uploaded == [str(resume)]

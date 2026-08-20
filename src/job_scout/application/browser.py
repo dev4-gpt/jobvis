@@ -82,7 +82,11 @@ class VisibleApplicationBrowser:
                 ),
                 None,
             )
-            if field and field.selector:
+            # File uploads are consequential personal-document transfers and
+            # need their own approval. Approving a name/email field must never
+            # implicitly upload the tailored CV or cover letter as a side
+            # effect of the artifacts being available.
+            if field and field.field_id in approved_ids and field.selector:
                 self._page.locator(field.selector).set_input_files(str(artifact))
                 filled.append(key)
         return filled
