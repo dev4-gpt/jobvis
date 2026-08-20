@@ -232,6 +232,35 @@ def test_rank_jobs_batches_by_five(monkeypatch, sample_profile):
     assert len(out["ranked_jobs"]) == 7
 
 
+def test_rank_jobs_uses_explicit_fallback_after_provider_failure(monkeypatch, sample_profile):
+    jobs = [make_job("j1", "Data Scientist", "Acme")]
+    primary = structured_llm(None)
+    primary.with_structured_output.return_value.invoke.side_effect = RuntimeError("429 rate limit")
+    fallback = structured_llm(JobScores(scores=[JobScore(job_id="j1", fit_score=82, fit_explanation="fallback")]))
+    models = iter([primary, fallback])
+    monkeypatch.setattr(rank_mod, "get_chat_model", lambda *args, **kwargs: next(models))
+    monkeypatch.setattr(
+        rank_mod,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "scout_model": "groq:primary",
+                "scout_fallback_models": "nvidia:fallback",
+                "scout_rank_batch": 4,
+                "scout_rank_timeout": 45.0,
+                "max_llm_calls_per_run": 4,
+            },
+        )(),
+    )
+
+    out = rank_jobs({"profile": sample_profile, "jobs": jobs, "llm_calls": 0})
+
+    assert out["ranked_jobs"][0].fit_score == 82
+    assert out["llm_calls"] == 2
+
+
 def test_rank_jobs_empty_jobs(sample_profile):
     out = rank_jobs({"profile": sample_profile, "jobs": [], "llm_calls": 0})
     assert out["ranked_jobs"] == []

@@ -70,6 +70,11 @@ def get_chat_model(model: str, temperature: float = 0.0, **kwargs: object) -> Ba
     return init_chat_model(model, temperature=temperature, **kwargs)
 
 
+def model_chain(primary: str, fallback_models: str = "") -> tuple[str, ...]:
+    """Return a de-duplicated, explicitly configured provider chain."""
+    return tuple(dict.fromkeys([item.strip() for item in (primary, *fallback_models.split(",")) if item.strip()]))
+
+
 def with_structured_output(model: BaseChatModel, schema: type, provider_model: str) -> object:
     """Bind a typed response using the provider's most reliable protocol.
 

@@ -22,3 +22,8 @@ def test_known_retired_model_has_replacement_hint():
 def test_ollama_tag_with_colon_in_model_id_is_valid():
     settings = Settings(SCOUT_MODEL="ollama:qwen3.5:4b")
     assert settings.scout_model == "ollama:qwen3.5:4b"
+
+
+def test_explicit_fallback_chain_is_validated_and_normalized():
+    settings = Settings(SCOUT_FALLBACK_MODELS=" groq:openai/gpt-oss-20b, nvidia:openai/gpt-oss-20b ")
+    assert settings.scout_fallback_models == "groq:openai/gpt-oss-20b,nvidia:openai/gpt-oss-20b"

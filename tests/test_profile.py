@@ -4,13 +4,27 @@ from __future__ import annotations
 
 import job_scout.profile as profile_mod
 from job_scout.profile import _augment_resume_facts, extract_profile
-from tests.conftest import structured_llm
+from tests.conftest import plain_llm, structured_llm
 
 
 def test_extract_profile(monkeypatch, sample_profile):
     monkeypatch.setattr(profile_mod, "get_chat_model", lambda *a, **k: structured_llm(sample_profile))
     result = extract_profile("some cv text")
     assert result is sample_profile
+
+
+def test_extract_profile_recovers_from_empty_structured_response(monkeypatch, sample_profile):
+    typed_model = structured_llm(sample_profile)
+    typed_model.with_structured_output.return_value.invoke.side_effect = ValueError(
+        "Structured Output response does not have a 'parsed' field nor a 'refusal' field"
+    )
+    recovery_model = plain_llm(sample_profile.model_dump_json())
+    models = iter([typed_model, recovery_model])
+    monkeypatch.setattr(profile_mod, "get_chat_model", lambda *args, **kwargs: next(models))
+
+    result = extract_profile("some cv text")
+
+    assert result == sample_profile
 
 
 def test_resume_facts_augment_education_timeline(sample_profile):

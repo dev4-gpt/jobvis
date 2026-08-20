@@ -29,6 +29,7 @@ os.environ["SCOUT_MAX_REFORMULATIONS"] = "2"
 # offline node tests exercise. Provider-specific Groq coverage is explicit.
 os.environ["SCOUT_MODEL"] = "openai:test-model"
 os.environ["SCOUT_FETCH_MODEL"] = ""
+os.environ["SCOUT_FALLBACK_MODELS"] = ""
 os.environ["SCOUT_RANK_BATCH"] = "4"
 os.environ["SCOUT_FAB_BULLET_RATIO"] = "0.65"
 os.environ["SCOUT_FAB_SKILL_RATIO"] = "0.85"

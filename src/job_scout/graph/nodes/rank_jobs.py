@@ -15,7 +15,7 @@ from job_scout.config import get_settings
 from job_scout.graph.prompts.rank_jobs import RANK_JOBS_PROMPT
 from job_scout.graph.schemas import JobPosting, JobScores, Profile, RankedJob
 from job_scout.graph.state import AgentState
-from job_scout.llm import ensure_budget, get_chat_model, with_structured_output
+from job_scout.llm import ensure_budget, get_chat_model, model_chain, with_structured_output
 
 # Batch size is a latency knob (SCOUT_RANK_BATCH): output tokens — and so batch
 # latency — scale with jobs per batch, and batches run in parallel, so smaller
@@ -91,19 +91,28 @@ def rank_jobs(state: AgentState) -> dict:
     calls = state.get("llm_calls", 0)
     batch_size = settings.scout_rank_batch
     n_batches = (len(to_score) + batch_size - 1) // batch_size
-    ensure_budget(calls, n_batches, settings.max_llm_calls_per_run)
+    models = model_chain(settings.scout_model, settings.scout_fallback_models)
+    # A fallback is opt-in and bounded. Reserve the worst-case budget before
+    # starting concurrent batches so a rate-limit retry cannot exceed the run
+    # circuit breaker halfway through the search.
+    ensure_budget(calls, n_batches * len(models), settings.max_llm_calls_per_run)
 
-    model_kwargs = {"timeout": settings.scout_rank_timeout, "max_retries": 1}
-    if settings.scout_model.startswith("groq:"):
-        # Qwen exposes ``none``; GPT-OSS requires one of low/medium/high.
-        model_kwargs["reasoning_effort"] = "low" if "openai/gpt-oss" in settings.scout_model else "none"
-    model = with_structured_output(
-        get_chat_model(settings.scout_model, temperature=0.0, **model_kwargs), JobScores, settings.scout_model
-    )
+    def structured_model(model_name: str):
+        model_kwargs = {"timeout": settings.scout_rank_timeout, "max_retries": 1}
+        if model_name.startswith("groq:"):
+            # Qwen exposes ``none``; GPT-OSS requires one of low/medium/high.
+            model_kwargs["reasoning_effort"] = "low" if "openai/gpt-oss" in model_name else "none"
+        return with_structured_output(get_chat_model(model_name, temperature=0.0, **model_kwargs), JobScores, model_name)
 
-    def score_batch(batch: list[JobPosting]) -> JobScores:
+    def score_batch(batch: list[JobPosting]) -> tuple[JobScores, int]:
         prompt = RANK_JOBS_PROMPT.format(profile=_render_profile(profile), jobs=_render_jobs(batch))
-        return model.invoke(prompt)
+        last_error: Exception | None = None
+        for attempts, model_name in enumerate(models, start=1):
+            try:
+                return structured_model(model_name).invoke(prompt), attempts
+            except Exception as exc:  # noqa: BLE001 - try only explicit fallback models
+                last_error = exc
+        raise RuntimeError(f"All configured ranking models failed ({', '.join(models)}).") from last_error
 
     # Batches are independent, so they run concurrently — ranking latency is the
     # slowest batch, not the sum. copy_context() carries LangChain's callback
@@ -129,9 +138,9 @@ def rank_jobs(state: AgentState) -> dict:
             ) from exc
         else:
             pool.shutdown(wait=True)
-    calls += len(batches)
+    calls += sum(used_calls for _scores, used_calls in results)
 
-    for result in results:
+    for result, _used_calls in results:
         for score in result.scores:
             job = by_id.get(score.job_id)
             if job is None:

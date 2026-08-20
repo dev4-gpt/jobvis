@@ -36,6 +36,10 @@ class Settings(BaseSettings):
 
     scout_model: str = Field(default="openai:gpt-4o-mini", alias="SCOUT_MODEL")
     scout_tailor_model: str = Field(default="openai:gpt-4o-mini", alias="SCOUT_TAILOR_MODEL")
+    # Comma-separated, explicit fallbacks used only after a provider call
+    # fails. Empty by default: a fallback must be a deliberate user choice
+    # because it may make an additional billable request.
+    scout_fallback_models: str = Field(default="", alias="SCOUT_FALLBACK_MODELS")
 
     openai_api_key: SecretStr = Field(default=SecretStr(""), alias="OPENAI_API_KEY")
     # OpenRouter exposes an OpenAI-compatible endpoint. This is deliberately
@@ -91,6 +95,7 @@ class Settings(BaseSettings):
         "scout_model",
         "scout_tailor_model",
         "scout_fetch_model",
+        "scout_fallback_models",
         "openai_base_url",
         "nvidia_base_url",
         "ollama_base_url",
@@ -135,6 +140,28 @@ class Settings(BaseSettings):
         if not model_id.strip():
             raise ValueError(f"{info.field_name} has an empty model id after {provider}:")
         return model
+
+    @field_validator("scout_fallback_models", mode="after")
+    @classmethod
+    def _validate_fallback_references(cls, value: str) -> str:
+        """Validate each explicit fallback using the same model rules."""
+        models = [item.strip() for item in value.split(",") if item.strip()]
+        for model in models:
+            if ":" not in model:
+                raise ValueError(
+                    "scout_fallback_models entries must use provider:model syntax, for example groq:openai/gpt-oss-20b"
+                )
+            provider, model_id = model.split(":", 1)
+            if provider not in _MODEL_PROVIDERS:
+                raise ValueError(f"scout_fallback_models uses unsupported provider {provider!r}")
+            retired_hint = _RETIRED_MODELS.get(model_id.lower())
+            if retired_hint:
+                raise ValueError(
+                    f"scout_fallback_models references retired model {model_id!r}; use {retired_hint!r} or another current model"
+                )
+            if not model_id.strip():
+                raise ValueError(f"scout_fallback_models has an empty model id after {provider}:")
+        return ",".join(models)
 
     @property
     def has_jsearch(self) -> bool:

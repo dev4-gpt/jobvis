@@ -8,12 +8,13 @@ finding jobs — and lets a caller (like the UI) extract once and reuse it.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date
 
 from job_scout.config import get_settings
 from job_scout.graph.schemas import EducationEntry, Profile
-from job_scout.llm import get_chat_model, with_structured_output
+from job_scout.llm import get_chat_model, model_chain, with_structured_output
 
 EXTRACT_PROFILE_PROMPT_NAME = "extract_profile"
 
@@ -58,15 +59,62 @@ def extract_profile(
 
     settings = get_settings()
     model_name = model or settings.scout_model
-    llm = with_structured_output(get_chat_model(model_name, temperature=0.0), Profile, model_name)
-
+    prompt = EXTRACT_PROFILE_PROMPT.format(cv_text=cv_text)
     tracer = get_tracer(thread_id, tags or ["extract"]) if thread_id else None
     config = {"callbacks": [tracer]} if tracer else {}
-    profile: Profile = llm.invoke(EXTRACT_PROFILE_PROMPT.format(cv_text=cv_text), config=config)
+    profile = _extract_with_model_chain(prompt, config, model_chain(model_name, settings.scout_fallback_models))
     profile = _augment_resume_facts(profile, cv_text)
     if tracer:
         tracer.flush()
     return profile
+
+
+def _message_text(message: object) -> str:
+    """Read text from provider-specific LangChain message shapes."""
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "\n".join(
+            item if isinstance(item, str) else str(item.get("text", "")) for item in content if isinstance(item, str | dict)
+        ).strip()
+    return ""
+
+
+def _parse_profile_json(message: object) -> Profile:
+    """Parse a plain JSON recovery response and validate it at the boundary."""
+    text = _message_text(message)
+    fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+    if not text:
+        raise ValueError("profile model returned no JSON content")
+    return Profile.model_validate(json.loads(text))
+
+
+def _extract_with_model_chain(prompt: str, config: dict, models: tuple[str, ...]) -> Profile:
+    """Use typed extraction with bounded plain-JSON recovery per model."""
+    last_error: Exception | None = None
+    for model_name in models:
+        try:
+            typed = with_structured_output(get_chat_model(model_name, temperature=0.0), Profile, model_name)
+            result = typed.invoke(prompt, config=config)
+            if isinstance(result, Profile):
+                return result
+            return Profile.model_validate(result)
+        except Exception as exc:  # noqa: BLE001 - try the explicit next model
+            last_error = exc
+            try:
+                recovery = get_chat_model(model_name, temperature=0.0)
+                return _parse_profile_json(
+                    recovery.invoke(
+                        f"{prompt}\n\nReturn one valid JSON object only. Do not use Markdown fences or commentary.",
+                        config=config,
+                    )
+                )
+            except Exception as recovery_error:  # noqa: BLE001 - continue to the next configured model
+                last_error = recovery_error
+    raise RuntimeError(f"All configured profile models failed ({', '.join(models)}).") from last_error
 
 
 def _augment_resume_facts(profile: Profile, cv_text: str) -> Profile:
