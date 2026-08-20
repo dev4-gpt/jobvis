@@ -78,6 +78,11 @@ export function JobsPanel({ state, onOpenApplication }: { state: State; onOpenAp
             <span className="meta">
               {job.company} · {job.location}
             </span>
+            <span className="meta">
+              {job.primary_or_adjacent ?? "review"} · {job.eligibility_status ?? "unknown"}
+              {job.work_mode ? ` · ${job.work_mode}` : ""}
+              {job.start_timing_fit ? ` · start ${job.start_timing_fit}` : ""}
+            </span>
           </span>
           <span className="score">{job.fit_score}</span>
           {job.url && (

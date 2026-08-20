@@ -17,7 +17,7 @@ from job_scout.candidate_fit import preferences_from_dict
 from job_scout.config import get_settings
 from job_scout.graph.schemas import CandidatePreferences, JobPosting, SearchRequest, SourceDiagnostic
 from job_scout.graph.state import AgentState
-from job_scout.llm import ensure_budget, get_chat_model, with_structured_output
+from job_scout.llm import ensure_budget, get_chat_model, model_chain, with_structured_output
 from job_scout.tools.jobs_api import location_to_country, search_jobs
 from job_scout.tools.jobs_api import run_search_detailed as run_search
 
@@ -205,42 +205,69 @@ def fetch_jobs(state: AgentState) -> dict:
 
     # Choosing tool arguments is a trivial call — SCOUT_FETCH_MODEL lets a
     # small/fast model do it (~1s instead of ~3s) without touching ranking.
-    model_name = settings.scout_fetch_model or settings.scout_model
-    if model_name.startswith("groq:"):
-        # Groq's Qwen models support structured JSON output, while this
-        # LangChain-generated function schema can intermittently fail with
-        # ``tool_use_failed`` before the model reaches our search adapter.
-        # Keep the provider-specific workaround at the boundary: the rest of
-        # the graph still receives the same constrained search arguments.
-        reasoning_effort = "low" if "openai/gpt-oss" in model_name else "none"
-        request_model = with_structured_output(
-            get_chat_model(
-                model_name,
-                temperature=0.0,
-                reasoning_effort=reasoning_effort,
-                timeout=60,
-                max_retries=3,
-            ),
-            SearchRequest,
-            model_name,
-        )
-        request: SearchRequest = request_model.invoke([SystemMessage(_STRUCTURED_SYSTEM), HumanMessage(_build_prompt(state))])
-        query, dropped = _trim_query(request.query)
-        model_country = request.country or None
+    model_names = model_chain(
+        settings.scout_fetch_model or settings.scout_model,
+        getattr(settings, "scout_fallback_models", ""),
+    )
+    # Fetch is normally deterministic for the candidate-aware UI, but older
+    # callers and notebooks still use this model-driven path. Reserve the
+    # complete explicit chain so a provider outage cannot exceed the run
+    # circuit breaker halfway through a retry sequence.
+    ensure_budget(calls, len(model_names), settings.max_llm_calls_per_run)
+    for attempts, model_name in enumerate(model_names, start=1):
+        try:
+            if model_name.startswith("groq:"):
+                # Groq's Qwen models support structured JSON output, while this
+                # LangChain-generated function schema can intermittently fail
+                # with ``tool_use_failed`` before the model reaches our search
+                # adapter. Keep the workaround at the provider boundary.
+                reasoning_effort = "low" if "openai/gpt-oss" in model_name else "none"
+                request_model = with_structured_output(
+                    get_chat_model(
+                        model_name,
+                        temperature=0.0,
+                        reasoning_effort=reasoning_effort,
+                        timeout=60,
+                        max_retries=1,
+                    ),
+                    SearchRequest,
+                    model_name,
+                )
+                request: SearchRequest = request_model.invoke(
+                    [SystemMessage(_STRUCTURED_SYSTEM), HumanMessage(_build_prompt(state))]
+                )
+                query, dropped = _trim_query(request.query)
+                model_country = request.country or None
+            else:
+                model = get_chat_model(model_name, temperature=0.0, timeout=60, max_retries=1).bind_tools([search_jobs])
+                message = model.invoke([SystemMessage(_SYSTEM), HumanMessage(_build_prompt(state))])
+                if message.tool_calls:
+                    args = message.tool_calls[0]["args"]
+                    query = args.get("query") or " ".join(profile.primary_roles[:2])
+                    query, dropped = _trim_query(query)
+                    model_country = args.get("country")
+                else:
+                    errors.append("fetch_jobs: LLM issued no tool call; used profile-derived query")
+                    query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3])
+                    query, dropped = _trim_query(query)
+                    model_country = None
+            calls += attempts
+            break
+        except Exception as exc:  # noqa: BLE001 - continue only through explicit fallbacks
+            errors.append(f"fetch_jobs: provider {model_name} failed: {type(exc).__name__}: {exc}")
     else:
-        model = get_chat_model(model_name, temperature=0.0).bind_tools([search_jobs])
-        message = model.invoke([SystemMessage(_SYSTEM), HumanMessage(_build_prompt(state))])
-        if message.tool_calls:
-            args = message.tool_calls[0]["args"]
-            query = args.get("query") or " ".join(profile.primary_roles[:2])
-            query, dropped = _trim_query(query)
-            model_country = args.get("country")
-        else:
-            errors.append("fetch_jobs: LLM issued no tool call; used profile-derived query")
-            query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3])
-            query, dropped = _trim_query(query)
-            model_country = None
-    calls += 1
+        calls += len(model_names)
+        # Query selection is an optimization, not a reason to discard the
+        # entire search. A provider outage, retired fetch model, or malformed
+        # tool request should still let the source cascade run with the
+        # candidate's first explicit role. Ranking remains the meaningful
+        # model-gated step and will report its own failure if necessary.
+        errors.append(
+            f"fetch_jobs: all configured fetch models failed ({', '.join(model_names)}); " "used a profile-derived query"
+        )
+        query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3]) or "data scientist"
+        query, dropped = _trim_query(query)
+        model_country = None
 
     if dropped:
         # Visible in the trace rather than silent: a query that needed

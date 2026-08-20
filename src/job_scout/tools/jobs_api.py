@@ -111,6 +111,51 @@ def _truncate(text: str) -> str:
     return (text or "")[:DESCRIPTION_LIMIT]
 
 
+def _normalize_employment(value: object) -> str:
+    """Map source-specific employment labels to the graph vocabulary."""
+    text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not text:
+        return "unknown"
+    if "intern" in text or "student" in text:
+        return "internship"
+    if "co_op" in text or "coop" in text:
+        return "co_op"
+    if "part" in text:
+        return "part_time"
+    if "temporary" in text or "seasonal" in text:
+        return "temporary"
+    if "contract" in text or text in {"freelance", "fixed_term"}:
+        return "contract"
+    if "full" in text or "permanent" in text:
+        return "full_time"
+    return "unknown"
+
+
+def _normalize_experience(value: object) -> str:
+    """Map a source's experience label without guessing from seniority prose."""
+    text = " ".join(str(item) for item in value.values()) if isinstance(value, dict) else str(value or "")
+    lowered = text.lower()
+    if any(term in lowered for term in ("intern", "student", "entry", "junior", "new grad")):
+        return "entry"
+    if any(term in lowered for term in ("senior", "staff", "principal", "lead")):
+        return "senior"
+    if any(term in lowered for term in ("mid", "associate", "intermediate")):
+        return "mid"
+    return "unknown"
+
+
+def _salary_text(minimum: object, maximum: object, period: object = "", currency: object = "") -> str:
+    """Render numeric source salary fields as a display-only string."""
+    if minimum in (None, "") and maximum in (None, ""):
+        return ""
+    prefix = f"{currency} " if currency else ""
+    if minimum not in (None, "") and maximum not in (None, "") and minimum != maximum:
+        amount = f"{minimum}–{maximum}"
+    else:
+        amount = str(minimum if minimum not in (None, "") else maximum)
+    return f"{prefix}{amount}{f'/{period}' if period else ''}"
+
+
 class JobSource(Protocol):
     """A pluggable jobs backend.
 
@@ -182,6 +227,7 @@ class JSearchSource:
     @staticmethod
     def _to_posting(r: dict) -> JobPosting:
         """Convert one JSearch result into a ``JobPosting``."""
+        apply_url = r.get("job_apply_link") or ""
         return JobPosting(
             job_id=f"jsearch-{r.get('job_id') or r.get('id', '')}",
             title=(r.get("job_title") or "").strip() or "Untitled",
@@ -189,9 +235,19 @@ class JSearchSource:
             location=JSearchSource._clean_location(r),
             remote=bool(r.get("job_is_remote")),
             description=_truncate(r.get("job_description") or ""),
-            url=r.get("job_apply_link") or "",
+            url=apply_url,
             tags=[t for t in [r.get("job_employment_type"), r.get("job_publisher")] if t],
             source="jsearch",
+            employment_type=_normalize_employment(r.get("job_employment_type")),
+            experience_level=_normalize_experience(r.get("job_required_experience")),
+            posted_at=r.get("job_posted_at_datetime_utc") or r.get("job_posted_at"),
+            salary_text=_salary_text(
+                r.get("job_min_salary"),
+                r.get("job_max_salary"),
+                r.get("job_salary_period"),
+                r.get("job_salary_currency"),
+            ),
+            source_url=apply_url,
         )
 
 
@@ -238,6 +294,7 @@ class AdzunaSource:
     def _to_posting(r: dict, code: str) -> JobPosting:
         """Convert one Adzuna result into a ``JobPosting``."""
         loc = (r.get("location") or {}).get("display_name") or code.upper()
+        apply_url = r.get("redirect_url", "")
         return JobPosting(
             job_id=f"adzuna-{r.get('id', '')}",
             title=r.get("title", "").strip() or "Untitled",
@@ -245,9 +302,13 @@ class AdzunaSource:
             location=loc,
             remote="remote" in (r.get("title", "") + loc).lower(),
             description=_truncate(r.get("description", "")),
-            url=r.get("redirect_url", ""),
+            url=apply_url,
             tags=[c.get("label", "") for c in [r.get("category", {})] if c.get("label")],
             source="adzuna",
+            employment_type=_normalize_employment(r.get("contract_time") or r.get("contract_type")),
+            posted_at=r.get("created"),
+            salary_text=_salary_text(r.get("salary_min"), r.get("salary_max"), r.get("salary_period")),
+            source_url=apply_url,
         )
 
 
@@ -273,6 +334,7 @@ class RemotiveSource:
     @staticmethod
     def _to_posting(r: dict) -> JobPosting:
         """Convert one Remotive result into a ``JobPosting``."""
+        source_url = r.get("url", "")
         return JobPosting(
             job_id=f"remotive-{r.get('id', '')}",
             title=r.get("title", "").strip() or "Untitled",
@@ -280,9 +342,13 @@ class RemotiveSource:
             location=r.get("candidate_required_location") or "Remote",
             remote=True,
             description=_truncate(r.get("description", "")),
-            url=r.get("url", ""),
+            url=source_url,
             tags=r.get("tags", []) or [],
             source="remotive",
+            employment_type=_normalize_employment(r.get("job_type")),
+            posted_at=r.get("publication_date"),
+            salary_text=r.get("salary", "") or "",
+            source_url=source_url,
         )
 
 

@@ -18,6 +18,15 @@ _INTERNSHIP = re.compile(r"\b(intern(ship)?|co[- ]?op|student|summer analyst|res
 _PART_TIME = re.compile(r"\b(part[- ]?time|temporary|seasonal|volunteer)\b", re.I)
 _FULL_TIME = re.compile(r"\b(full[- ]?time|permanent)\b", re.I)
 _CLEARANCE = re.compile(r"\b(clearance|security clearance|secret|top secret|ts/sci|polygraph|public trust)\b", re.I)
+_NO_CLEARANCE = re.compile(
+    r"\b(?:no|without|not required|not needed|clearance[- ]free)\s+(?:active\s+|security\s+)?clearance\b|"
+    r"\b(?:security\s+)?clearance\s+(?:is\s+)?(?:not required|not needed)\b",
+    re.I,
+)
+_OPTIONAL_CLEARANCE = re.compile(
+    r"\b(?:clearance obtainable|clearance can be obtained|ability to obtain (?:security\s+)?clearance)\b",
+    re.I,
+)
 _SPONSOR = re.compile(r"\b(sponsorship|sponsor|visa|h[- ]?1b|work authorization)\b", re.I)
 _NO_SPONSOR = re.compile(r"\b(no sponsorship|without sponsorship|must be authorized|us citizen|citizenship required)\b", re.I)
 _REMOTE = re.compile(r"\b(remote|work from home|distributed)\b", re.I)
@@ -87,14 +96,25 @@ def normalize_job(job: JobPosting) -> JobPosting:
     """Fill source-neutral job metadata from title, tags, and description."""
     text = " ".join((job.title, job.description, *job.tags))
     title_text = job.title.lower()
-    if _INTERNSHIP.search(text):
+    # Prefer source metadata. A full-time description can mention an intern or
+    # internship as background context; only an explicit title cue may override
+    # a known source classification.
+    title_internship = re.search(r"\b(intern(ship)?|student)\b", title_text)
+    title_coop = re.search(r"\bco[- ]?op\b", title_text)
+    if title_internship:
+        employment = "internship"
+    elif title_coop:
+        employment = "co_op"
+    elif job.employment_type != "unknown":
+        employment = job.employment_type
+    elif _INTERNSHIP.search(text):
         employment = "internship" if "intern" in text.lower() else "co_op"
     elif _PART_TIME.search(text):
         employment = "part_time"
     elif _FULL_TIME.search(text):
         employment = "full_time"
     else:
-        employment = job.employment_type
+        employment = "unknown"
 
     if job.work_mode != "unknown":
         work_mode = job.work_mode
@@ -117,6 +137,8 @@ def normalize_job(job: JobPosting) -> JobPosting:
         level = job.experience_level
 
     clearance = job.clearance_required or bool(_CLEARANCE.search(text))
+    if _NO_CLEARANCE.search(text) or _OPTIONAL_CLEARANCE.search(text):
+        clearance = False
     auth = job.authorization_requirement
     sponsorship = job.sponsorship_signal
     if auth == "unknown" and _NO_SPONSOR.search(text):
@@ -147,7 +169,19 @@ def normalize_job(job: JobPosting) -> JobPosting:
 def role_bucket(job: JobPosting, preferences: CandidatePreferences) -> str:
     """Classify a title into primary, adjacent, or review without an LLM."""
     haystack = f"{job.title} {job.description[:900]}".lower()
-    primary_terms = tuple(term for family in preferences.primary_role_families for term in PRIMARY_FAMILY_TERMS.get(family, ()))
+    primary_terms: list[str] = []
+    for family in preferences.primary_role_families:
+        terms = PRIMARY_FAMILY_TERMS.get(family, ())
+        if family == "forward_deployed":
+            # Generic Solutions Engineer postings are not automatically AI
+            # roles. Require either the explicit forward-deployed title or
+            # technical AI/customer-deployment context from the description.
+            if any(term in haystack for term in ("forward deployed", "forward-deployed")) or any(
+                term in haystack for term in (" ai ", "machine learning", "ml ", "llm", "generative", "rag", "model deployment")
+            ):
+                primary_terms.extend(terms)
+        else:
+            primary_terms.extend(terms)
     if any(term in haystack for term in primary_terms):
         return "primary"
     if any(term in haystack for term in ADJACENT_TERMS):
@@ -230,6 +264,8 @@ def assess_eligibility(
             blockers.append("explicit security clearance requirement")
         else:
             reasons.append("security clearance is required")
+    elif _OPTIONAL_CLEARANCE.search(f"{normalized.title} {normalized.description}"):
+        reasons.append("clearance may be obtainable; confirm the employer's exact requirement")
     auth_signal = normalized.authorization_requirement in {"restricted", "mentioned"}
     sponsorship_signal = normalized.sponsorship_signal in {"not_available", "mentioned"}
     if auth_signal or sponsorship_signal:

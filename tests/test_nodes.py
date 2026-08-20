@@ -43,6 +43,7 @@ def test_fetch_jobs_uses_structured_args_for_groq(monkeypatch, sample_profile, s
             {
                 "scout_fetch_model": "groq:qwen/qwen3.6-27b",
                 "scout_model": "groq:qwen/qwen3.6-27b",
+                "scout_fallback_models": "",
                 "max_llm_calls_per_run": 25,
                 "scout_max_jobs": 10,
             },
@@ -59,6 +60,74 @@ def test_fetch_jobs_uses_structured_args_for_groq(monkeypatch, sample_profile, s
     assert captured == {"query": "ml engineer", "country": "de", "remote": True}
     assert out["jobs"] == sample_jobs
     assert out["llm_calls"] == 1
+
+
+def test_fetch_jobs_uses_explicit_fallback_after_provider_failure(monkeypatch, sample_profile, sample_jobs):
+    """The legacy query-selector path honors the same failover chain as ranking."""
+    primary = structured_llm(None)
+    primary.with_structured_output.return_value.invoke.side_effect = RuntimeError("429 rate limit")
+    fallback = tool_calling_llm([{"name": "search_jobs", "args": {"query": "ml engineer", "country": "us"}}])
+    models = iter([primary, fallback])
+    monkeypatch.setattr(fetch_mod, "get_chat_model", lambda *args, **kwargs: next(models))
+    monkeypatch.setattr(
+        fetch_mod,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "scout_fetch_model": "groq:primary",
+                "scout_model": "groq:primary",
+                "scout_fallback_models": "nvidia:fallback",
+                "max_llm_calls_per_run": 4,
+                "scout_max_jobs": 10,
+            },
+        )(),
+    )
+    monkeypatch.setattr(fetch_mod, "run_search", lambda **kwargs: (sample_jobs, ["cache"]))
+
+    out = fetch_jobs({"profile": sample_profile, "llm_calls": 0})
+
+    assert out["search_query"] == "ml engineer"
+    assert out["llm_calls"] == 2
+    assert any("primary" in error and "rate limit" in error for error in out["errors"])
+
+
+def test_fetch_jobs_falls_back_to_profile_query_when_all_models_fail(monkeypatch, sample_profile, sample_jobs):
+    """Fetch-model failure must not discard an otherwise usable source search."""
+    failing = structured_llm(None)
+    failing.with_structured_output.return_value.invoke.side_effect = RuntimeError("model unavailable")
+    failing.bind_tools.return_value.invoke.side_effect = RuntimeError("model unavailable")
+    monkeypatch.setattr(fetch_mod, "get_chat_model", lambda *args, **kwargs: failing)
+    monkeypatch.setattr(
+        fetch_mod,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "scout_fetch_model": "groq:retired",
+                "scout_model": "groq:retired",
+                "scout_fallback_models": "nvidia:also-unavailable",
+                "max_llm_calls_per_run": 4,
+                "scout_max_jobs": 10,
+            },
+        )(),
+    )
+    captured = {}
+
+    def fake_run_search(**kwargs):
+        captured.update(kwargs)
+        return sample_jobs, ["cache"]
+
+    monkeypatch.setattr(fetch_mod, "run_search", fake_run_search)
+
+    out = fetch_jobs({"profile": sample_profile, "llm_calls": 0})
+
+    assert out["jobs"] == sample_jobs
+    assert captured["query"] == "Data Scientist ML Engineer"
+    assert out["llm_calls"] == 2
+    assert any("profile-derived query" in error for error in out["errors"])
 
 
 def test_fetch_jobs_trims_keyword_soup_to_a_title(monkeypatch, sample_profile, sample_jobs):

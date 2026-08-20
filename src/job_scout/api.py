@@ -105,6 +105,14 @@ def _job_row(ranked: RankedJob, rank: int) -> dict:
             start_timing_fit=ranked.start_timing_fit,
             employment_type=ranked.job.employment_type,
             work_mode=ranked.job.work_mode,
+            experience_level=ranked.job.experience_level,
+            posted_at=ranked.job.posted_at,
+            start_date_text=ranked.job.start_date_text,
+            clearance_required=ranked.job.clearance_required,
+            authorization_requirement=ranked.job.authorization_requirement,
+            sponsorship_signal=ranked.job.sponsorship_signal,
+            salary_text=ranked.job.salary_text,
+            source_url=ranked.job.source_url or ranked.job.url,
             source=ranked.job.source,
         )
     return row
@@ -151,6 +159,8 @@ def _candidate_payload(profile: Profile | None) -> dict | None:
         "seniority": profile.seniority,
         "locations": list(profile.locations),
         "remote_ok": profile.remote_ok,
+        "phone": profile.phone,
+        "professional_experience_months": profile.professional_experience_months,
         "education_history": [entry.model_dump(mode="json") for entry in profile.education_history],
         "expected_graduation_date": profile.expected_graduation_date.isoformat() if profile.expected_graduation_date else None,
         "current_program": profile.current_program,

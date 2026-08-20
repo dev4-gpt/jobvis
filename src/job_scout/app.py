@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 import socket
 import tempfile
+from datetime import date
 from html import escape, unescape
 from pathlib import Path
 from uuid import uuid4
@@ -421,6 +422,18 @@ def _job_card(ranked: RankedJob, index: int) -> str:
     reasons = ranked.hard_blockers or ranked.eligibility_reasons
     policy = "".join(f"<li>{escape(reason)}</li>" for reason in reasons[:3])
     policy_html = f'<ul class="js-muted" style="margin:8px 0 0;padding-left:18px">{policy}</ul>' if policy else ""
+    risk_bits = []
+    if job.clearance_required:
+        risk_bits.append("clearance required")
+    if job.authorization_requirement != "unknown":
+        risk_bits.append("authorization language needs confirmation")
+    if job.sponsorship_signal != "unknown":
+        risk_bits.append("sponsorship language needs confirmation")
+    risk_html = (
+        f'<p class="js-muted" style="font-size:0.8rem;margin:5px 0 0">⚠ {escape(" · ".join(risk_bits))}</p>' if risk_bits else ""
+    )
+    freshness = f"posted {job.posted_at}" if job.posted_at else "posted date unknown"
+    salary = f" · {job.salary_text}" if job.salary_text else ""
     delay = f"animation-delay:{min(index, 8) * 55}ms"
     return (
         f'<div class="js-job" style="{delay}">'
@@ -433,8 +446,9 @@ def _job_card(ranked: RankedJob, index: int) -> str:
         f'<p class="js-job-why">{escape(ranked.fit_explanation)}</p>'
         f'<p class="js-muted" style="font-size:0.8rem;margin:8px 0 0">'
         f"Role fit {ranked.role_fit_score} · evidence fit {ranked.evidence_fit_score} · "
-        f"{escape(ranked.job.employment_type)} · {escape(ranked.job.work_mode)} · start {escape(ranked.start_timing_fit)}</p>"
-        f"{policy_html}"
+        f"{escape(ranked.job.employment_type)} · {escape(ranked.job.work_mode)} · start {escape(ranked.start_timing_fit)} · "
+        f"{escape(freshness)}{escape(salary)}</p>"
+        f"{risk_html}{policy_html}"
         f"{matched}{gaps}"
         "</div>"
     )
@@ -745,7 +759,30 @@ def _selection_to_prefs(selection: list[str]) -> dict:
     return preferences
 
 
-def _preferences_from_ui(selection: list[str], raw: dict | None) -> tuple[dict, CandidatePreferences | None]:
+def _parse_policy_date(value: object, fallback: date | None) -> date | None:
+    """Parse a date control without letting a typo erase the saved policy."""
+    if value is None or not str(value).strip():
+        return fallback
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value).strip())
+    except ValueError:
+        return fallback
+
+
+def _preferences_from_ui(
+    selection: list[str],
+    raw: dict | None,
+    employment_types: list[str] | None = None,
+    target_start_min: object = None,
+    target_start_max: object = None,
+    accepted_work_modes: list[str] | None = None,
+    primary_role_families: list[str] | None = None,
+    authorization_status: str | None = None,
+    sponsorship_policy: str | None = None,
+    clearance_status: str | None = None,
+) -> tuple[dict, CandidatePreferences | None]:
     """Combine the location chooser with the typed intent editor.
 
     ``raw is None`` preserves the legacy handler contract used by notebooks and
@@ -765,6 +802,25 @@ def _preferences_from_ui(selection: list[str], raw: dict | None) -> tuple[dict, 
             "country_scope": "us" if legacy.get("country_scope") == "us" else "selected",
         }
     )
+    updates: dict[str, object] = {}
+    if employment_types is not None:
+        updates["employment_types"] = employment_types
+    if target_start_min is not None:
+        updates["target_start_min"] = _parse_policy_date(target_start_min, typed.target_start_min)
+    if target_start_max is not None:
+        updates["target_start_max"] = _parse_policy_date(target_start_max, typed.target_start_max)
+    if accepted_work_modes is not None:
+        updates["accepted_work_modes"] = accepted_work_modes
+    if primary_role_families is not None:
+        updates["primary_role_families"] = primary_role_families
+    if authorization_status is not None:
+        updates["authorization_status"] = authorization_status
+    if sponsorship_policy is not None:
+        updates["sponsorship_policy"] = sponsorship_policy
+    if clearance_status is not None:
+        updates["clearance_status"] = clearance_status
+    if updates:
+        typed = typed.model_copy(update=updates)
     return typed.model_dump(mode="json"), typed
 
 
@@ -801,9 +857,23 @@ def on_prefs_change(selection: list[str], profile: Profile | None, cv_text: str,
     """Persist the chooser's state and keep the voice bridge on the same page."""
     if profile is None:
         return
-    prefs = _selection_to_prefs(selection)
     stored = candidate_store.load_candidate()
     links = stored.cv_links if stored else []
+    current = stored.candidate_preferences if stored else CandidatePreferences()
+    location_prefs = _selection_to_prefs(selection)
+    # Location changes must not silently reset the separately confirmed
+    # employment, timing, role-family, authorization, or clearance policy.
+    modes = [mode for mode in current.accepted_work_modes if mode != "remote"]
+    if location_prefs.get("remote"):
+        modes.insert(0, "remote")
+    current = current.model_copy(
+        update={
+            "locations": location_prefs["locations"],
+            "country_scope": location_prefs.get("country_scope", "selected"),
+            "accepted_work_modes": list(dict.fromkeys(modes)),
+        }
+    )
+    prefs = current.model_dump(mode="json")
     voice_bridge.get_bridge().record_profile(candidate_store.effective_profile(profile, prefs), cv_text, thread_id, links)
     candidate_store.save_candidate(profile, cv_text, prefs, links)
 
@@ -846,16 +916,17 @@ def _on_load(thread_id: str):
     restored, Find jobs ready, Jobvis pre-seeded — and no LLM call happens
     (the extraction was paid for when the CV was first uploaded). Jobs are NOT
     restored: results go stale, so every session fetches fresh.
-    Outputs: (page_start, page_profile, profile_html, cv_text_state,
-    profile_state, loc_choices_state, loc_group, links_editor).
+    Outputs also restore the typed target-search controls so a restart cannot
+    silently replace a candidate's confirmed policy with the defaults.
     """
     voice_bridge.get_bridge().register_thread(thread_id)
     stored = candidate_store.load_candidate()
     if stored is None:
-        return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
+        return (gr.update(),) * 17
     choices, selected = _preference_selection(stored.profile, stored.preferences)
     effective = candidate_store.effective_profile(stored.profile, stored.preferences)
     voice_bridge.get_bridge().record_profile(effective, stored.cv_text, thread_id, stored.cv_links)
+    policy = stored.candidate_preferences
     note = (
         '<p class="js-muted" style="text-align:center;font-size:0.8rem;margin-top:10px">'
         "Restored from your last session — “Start over” forgets it.</p>"
@@ -869,6 +940,15 @@ def _on_load(thread_id: str):
         choices,
         gr.update(choices=choices, value=selected),
         gr.update(value=[link.model_dump() for link in stored.cv_links]),
+        gr.update(value=policy.model_dump(mode="json")),
+        gr.update(value=policy.employment_types),
+        gr.update(value=str(policy.target_start_min or "")),
+        gr.update(value=str(policy.target_start_max or "")),
+        gr.update(value=policy.accepted_work_modes),
+        gr.update(value=policy.primary_role_families),
+        gr.update(value=policy.authorization_status),
+        gr.update(value=policy.sponsorship_policy),
+        gr.update(value=policy.clearance_status),
     )
 
 
@@ -927,6 +1007,14 @@ def on_find(
     thread_id: str,
     loc_selection: list[str],
     preference_value: dict | None = None,
+    employment_types: list[str] | None = None,
+    target_start_min: object = None,
+    target_start_max: object = None,
+    accepted_work_modes: list[str] | None = None,
+    primary_role_families: list[str] | None = None,
+    authorization_status: str | None = None,
+    sponsorship_policy: str | None = None,
+    clearance_status: str | None = None,
 ):
     """Step 2 → 3: run the job-finding graph for the chosen locations and stream results.
 
@@ -940,7 +1028,18 @@ def on_find(
         yield (gr.update(visible=True), gr.update(visible=False), gr.update(), "", gr.update())
         return
 
-    prefs, typed_preferences = _preferences_from_ui(loc_selection or [], preference_value)
+    prefs, typed_preferences = _preferences_from_ui(
+        loc_selection or [],
+        preference_value,
+        employment_types,
+        target_start_min,
+        target_start_max,
+        accepted_work_modes,
+        primary_role_families,
+        authorization_status,
+        sponsorship_policy,
+        clearance_status,
+    )
     effective = candidate_store.effective_profile(profile, prefs)
     stored = candidate_store.load_candidate()
     cv_links = stored.cv_links if stored else []
@@ -1054,6 +1153,15 @@ def reset():
         [],
         gr.update(choices=[], value=[]),
         gr.update(value=[]),
+        gr.update(value=CandidatePreferences().model_dump(mode="json")),
+        gr.update(value=CandidatePreferences().employment_types),
+        gr.update(value=str(CandidatePreferences().target_start_min)),
+        gr.update(value=str(CandidatePreferences().target_start_max)),
+        gr.update(value=CandidatePreferences().accepted_work_modes),
+        gr.update(value=CandidatePreferences().primary_role_families),
+        gr.update(value=CandidatePreferences().authorization_status),
+        gr.update(value=CandidatePreferences().sponsorship_policy),
+        gr.update(value=CandidatePreferences().clearance_status),
     )
 
 
@@ -1105,11 +1213,74 @@ def build_app() -> gr.Blocks:
                 "not a decision. Tick cities, or choose <b>Anywhere in the United States</b> if you are open to "
                 "relocating to any US city; add anywhere we missed.</p>"
             )
-            target_preferences = gr.JSON(
-                label="Target search policy (edit before searching)",
-                value=CandidatePreferences().model_dump(mode="json"),
-                visible=True,
-            )
+            default_policy = CandidatePreferences()
+            with gr.Accordion("Target search policy", open=True):
+                gr.HTML(
+                    '<p class="js-muted" style="font-size:0.86rem">These constraints are authoritative. '
+                    "Jobvis will not infer work authorization, sponsorship, or clearance from your resume.</p>"
+                )
+                with gr.Row():
+                    employment_types = gr.CheckboxGroup(
+                        label="Employment type",
+                        choices=[
+                            ("Full-time", "full_time"),
+                            ("Contract", "contract"),
+                            ("Part-time", "part_time"),
+                        ],
+                        value=default_policy.employment_types,
+                    )
+                    accepted_work_modes = gr.CheckboxGroup(
+                        label="Accepted work modes",
+                        choices=[("Remote", "remote"), ("Hybrid", "hybrid"), ("Onsite", "onsite")],
+                        value=default_policy.accepted_work_modes,
+                    )
+                with gr.Row():
+                    target_start_min = gr.Textbox(
+                        label="Earliest start (YYYY-MM-DD)",
+                        value=str(default_policy.target_start_min),
+                    )
+                    target_start_max = gr.Textbox(
+                        label="Latest start (YYYY-MM-DD)",
+                        value=str(default_policy.target_start_max),
+                    )
+                primary_role_families = gr.CheckboxGroup(
+                    label="Primary role families",
+                    choices=[
+                        ("AI / ML", "ai_ml"),
+                        ("Data Science", "data_science"),
+                        ("GenAI / LLM / RAG", "genai"),
+                        ("Forward-deployed / Solutions", "forward_deployed"),
+                        ("Computer Vision", "computer_vision"),
+                        ("MLOps / ML Platform", "mlops"),
+                    ],
+                    value=default_policy.primary_role_families,
+                )
+                with gr.Row():
+                    authorization_status = gr.Dropdown(
+                        label="Work authorization",
+                        choices=[("Unknown — ask me", "unknown"), ("Confirmed", "confirmed"), ("Not eligible", "ineligible")],
+                        value=default_policy.authorization_status,
+                    )
+                    sponsorship_policy = gr.Dropdown(
+                        label="Sponsorship",
+                        choices=[
+                            ("Unknown — review each job", "unknown"),
+                            ("Required", "required"),
+                            ("Not required", "not_required"),
+                        ],
+                        value=default_policy.sponsorship_policy,
+                    )
+                    clearance_status = gr.Dropdown(
+                        label="Security clearance",
+                        choices=[("Unknown / none confirmed", "unknown"), ("Confirmed", "confirmed")],
+                        value=default_policy.clearance_status,
+                    )
+            with gr.Accordion("Advanced policy JSON", open=False):
+                target_preferences = gr.JSON(
+                    label="Target search policy (advanced)",
+                    value=default_policy.model_dump(mode="json"),
+                    visible=True,
+                )
             # Keep the two global choices present even before profile extraction
             # finishes. This prevents Gradio from rejecting a fast click on
             # "Anywhere in the United States" while the dynamic city choices
@@ -1196,7 +1367,21 @@ def build_app() -> gr.Blocks:
         )
         find_btn.click(
             on_find,
-            inputs=[cv_text_state, profile_state, thread_id, loc_group, target_preferences],
+            inputs=[
+                cv_text_state,
+                profile_state,
+                thread_id,
+                loc_group,
+                target_preferences,
+                employment_types,
+                target_start_min,
+                target_start_max,
+                accepted_work_modes,
+                primary_role_families,
+                authorization_status,
+                sponsorship_policy,
+                clearance_status,
+            ],
             outputs=[page_profile, page_results, results_out, footer_out, job_select],
         )
         tailor_btn.click(
@@ -1239,6 +1424,15 @@ def build_app() -> gr.Blocks:
             loc_choices_state,
             loc_group,
             links_editor,
+            target_preferences,
+            employment_types,
+            target_start_min,
+            target_start_max,
+            accepted_work_modes,
+            primary_role_families,
+            authorization_status,
+            sponsorship_policy,
+            clearance_status,
         ]
         change_btn.click(reset, outputs=reset_outputs)
         restart_btn.click(reset, outputs=reset_outputs)
@@ -1281,6 +1475,15 @@ def build_app() -> gr.Blocks:
                 loc_choices_state,
                 loc_group,
                 links_editor,
+                target_preferences,
+                employment_types,
+                target_start_min,
+                target_start_max,
+                accepted_work_modes,
+                primary_role_families,
+                authorization_status,
+                sponsorship_policy,
+                clearance_status,
             ],
         )
 

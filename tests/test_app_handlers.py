@@ -60,6 +60,29 @@ def test_location_chooser_always_includes_us_scope(sample_profile):
     assert app_mod.US_SCOPE_CHOICE in choices
 
 
+def test_target_policy_controls_are_authoritative(sample_profile):
+    raw = app_mod.CandidatePreferences().model_dump(mode="json")
+    prefs, typed = app_mod._preferences_from_ui(
+        [app_mod.US_SCOPE_CHOICE],
+        raw,
+        ["full_time"],
+        "2026-12-01",
+        "2027-03-31",
+        ["hybrid", "onsite"],
+        ["ai_ml", "forward_deployed"],
+        "unknown",
+        "required",
+        "confirmed",
+    )
+    assert typed is not None
+    assert prefs["country_scope"] == "us"
+    assert prefs["employment_types"] == ["full_time"]
+    assert prefs["accepted_work_modes"] == ["hybrid", "onsite"]
+    assert prefs["primary_role_families"] == ["ai_ml", "forward_deployed"]
+    assert prefs["sponsorship_policy"] == "required"
+    assert prefs["clearance_status"] == "confirmed"
+
+
 def test_on_tailor_renders_pack_and_honesty_note(monkeypatch, sample_profile):
     monkeypatch.setattr(app_mod, "stream_tailor", _fake_stream(_tailor_result()))
     final = list(on_tailor("j1", "t1", None, sample_profile))[-1]

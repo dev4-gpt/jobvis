@@ -165,6 +165,11 @@ def test_jsearch_builds_location_query_and_maps_fields(respx_mock):
                     "job_description": "python and sql",
                     "job_apply_link": "https://example.com/apply",
                     "job_employment_type": "FULLTIME",
+                    "job_posted_at_datetime_utc": "2026-08-18T12:00:00Z",
+                    "job_min_salary": 90000,
+                    "job_max_salary": 110000,
+                    "job_salary_period": "YEAR",
+                    "job_salary_currency": "USD",
                 }
             ],
         }
@@ -182,6 +187,10 @@ def test_jsearch_builds_location_query_and_maps_fields(respx_mock):
     assert jobs[0].company == "Acme GmbH"
     assert jobs[0].location == "Berlin"
     assert jobs[0].source == "jsearch"
+    assert jobs[0].employment_type == "full_time"
+    assert jobs[0].posted_at == "2026-08-18T12:00:00Z"
+    assert jobs[0].salary_text == "USD 90000–110000/YEAR"
+    assert jobs[0].source_url == jobs[0].url
 
 
 def test_jsearch_primary_when_available():

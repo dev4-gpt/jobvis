@@ -14,6 +14,25 @@ export type Job = {
   url: string;
   fit_score: number;
   why: string;
+  final_priority_score?: number;
+  role_fit_score?: number;
+  evidence_fit_score?: number;
+  eligibility_status?: string;
+  eligibility_reasons?: string[];
+  hard_blockers?: string[];
+  primary_or_adjacent?: string;
+  start_timing_fit?: string;
+  employment_type?: string;
+  work_mode?: string;
+  experience_level?: string;
+  posted_at?: string | null;
+  start_date_text?: string;
+  clearance_required?: boolean;
+  authorization_requirement?: string;
+  sponsorship_signal?: string;
+  salary_text?: string;
+  source_url?: string;
+  source?: string;
 };
 
 export type Pack = {
@@ -42,6 +61,12 @@ export type Candidate = {
   seniority: string;
   locations: string[];
   remote_ok: boolean;
+  phone?: string | null;
+  professional_experience_months?: number | null;
+  education_history?: { institution: string; degree: string; field: string; start_date?: string | null; end_date?: string | null; in_progress: boolean }[];
+  expected_graduation_date?: string | null;
+  current_program?: string | null;
+  degree_fields?: string[];
 };
 
 export type RunStatus = {
@@ -58,7 +83,16 @@ export type State = {
   step: string;
   thread_id: string;
   candidate: Candidate | null;
+  candidate_preferences?: Record<string, unknown> | null;
   jobs: Job[];
+  source_coverage?: {
+    fetched: number;
+    ranked: number;
+    primary: number;
+    adjacent: number;
+    blocked_or_review: number;
+    sources: string[];
+  };
   pack: Pack | null;
   run: RunStatus;
   application: ApplicationState;

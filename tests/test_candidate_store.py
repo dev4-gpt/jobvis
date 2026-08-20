@@ -75,7 +75,25 @@ def test_on_load_without_store_is_a_noop(tmp_store, fresh_bridge):
 def test_on_load_restores_candidate_and_opens_step_two(tmp_store, fresh_bridge, sample_profile):
     tmp_store.save_candidate(sample_profile, "cv text here", {"locations": ["Tokyo, Japan"], "remote": False})
 
-    page_start, page_profile, profile_html, cv_text, profile, loc_choices, loc_group, links = app_module._on_load("t1")
+    (
+        page_start,
+        page_profile,
+        profile_html,
+        cv_text,
+        profile,
+        loc_choices,
+        loc_group,
+        links,
+        target_policy,
+        employment_types,
+        start_min,
+        start_max,
+        work_modes,
+        role_families,
+        authorization,
+        sponsorship,
+        clearance,
+    ) = app_module._on_load("t1")
 
     assert page_start["visible"] is False and page_profile["visible"] is True
     assert "Test Candidate" in profile_html and "Restored from your last session" in profile_html
@@ -83,6 +101,15 @@ def test_on_load_restores_candidate_and_opens_step_two(tmp_store, fresh_bridge, 
     assert profile == sample_profile  # the RAW profile — extraction stays what was measured
     assert "Tokyo, Japan" in loc_choices and loc_group["value"] == ["Tokyo, Japan"]  # stored choice wins, remote off
     assert links.get("value") == []
+    assert target_policy["value"]["locations"] == ["Tokyo, Japan"]
+    assert employment_types["value"] == ["full_time"]
+    assert start_min["value"] == "2026-12-01"
+    assert start_max["value"] == "2027-03-31"
+    assert work_modes["value"] == ["hybrid", "onsite"]
+    assert "ai_ml" in role_families["value"]
+    assert authorization["value"] == "unknown"
+    assert sponsorship["value"] == "unknown"
+    assert clearance["value"] == "unknown"
     snap = fresh_bridge.snapshot()
     assert snap.profile.locations == ["Tokyo, Japan"] and snap.profile.remote_ok is False  # Jobvis sees the choice
     assert snap.step == "profile"
@@ -138,7 +165,9 @@ def test_on_add_location_ticks_and_persists(tmp_store, fresh_bridge, sample_prof
     assert new_choices == ["Berlin, Germany", "Lisbon", app_module.REMOTE_CHOICE]
     assert group_update["value"] == ["Berlin, Germany", "Lisbon"]
     assert cleared == ""
-    assert tmp_store.load_candidate().preferences == {"locations": ["Berlin, Germany", "Lisbon"], "remote": False}
+    saved = tmp_store.load_candidate().candidate_preferences
+    assert saved.locations == ["Berlin, Germany", "Lisbon"]
+    assert saved.accepted_work_modes == ["hybrid", "onsite"]
 
     unchanged, no_update, _ = app_module.on_add_location("Lisbon", new_choices, [], sample_profile, "cv", "t1")
     assert unchanged == new_choices and "value" not in no_update  # duplicates are a no-op

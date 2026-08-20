@@ -110,3 +110,32 @@ def test_forward_deployed_is_a_primary_portfolio_fit():
     job = normalize_job(_job("Forward Deployed Engineer", "Full-time role deploying AI systems with customers."))
     assert role_bucket(job, CandidatePreferences()) == "primary"
     assert "Veloce AgenticOS" in resume_persona(job)
+
+
+def test_generic_solutions_engineer_is_not_automatically_an_ai_primary():
+    generic = normalize_job(_job("Solutions Engineer", "Full-time role supporting enterprise software customers."))
+    ai = normalize_job(_job("Solutions Engineer", "Full-time role deploying LLM and RAG systems with customers."))
+    assert role_bucket(generic, CandidatePreferences()) != "primary"
+    assert role_bucket(ai, CandidatePreferences()) == "primary"
+
+
+def test_known_full_time_metadata_survives_internship_context():
+    job = _job("Data Scientist", "Full-time role; mentorship includes interns and student researchers.").model_copy(
+        update={"employment_type": "full_time"}
+    )
+    assert normalize_job(job).employment_type == "full_time"
+
+
+def test_clearance_not_required_is_not_a_blocker():
+    job = normalize_job(_job("AI Engineer", "Full-time role; security clearance not required; Python and RAG."))
+    assessment = assess_eligibility(job, _profile(), CandidatePreferences(), role_fit_score=90, evidence_fit_score=85)
+    assert job.clearance_required is False
+    assert "explicit security clearance requirement" not in assessment.hard_blockers
+
+
+def test_clearance_obtainable_is_reviewable_not_blocked():
+    job = normalize_job(_job("AI Engineer", "Full-time role; ability to obtain security clearance preferred."))
+    assessment = assess_eligibility(job, _profile(), CandidatePreferences(), role_fit_score=90, evidence_fit_score=85)
+    assert job.clearance_required is False
+    assert assessment.status == "borderline"
+    assert any("obtainable" in reason for reason in assessment.reasons)
