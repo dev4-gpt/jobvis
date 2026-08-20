@@ -52,6 +52,17 @@ def test_profile_carries_graduation_timeline():
     assert profile.education_history[0].in_progress is True
 
 
+def test_default_policy_covers_the_candidate_portfolio_lanes():
+    assert CandidatePreferences().primary_role_families == [
+        "ai_ml",
+        "data_science",
+        "genai",
+        "forward_deployed",
+        "computer_vision",
+        "mlops",
+    ]
+
+
 def test_internship_is_blocked_from_primary_results():
     job = normalize_job(_job("AI/ML Intern", "Internship for summer 2027; Python and PyTorch."))
     assessment = assess_eligibility(job, _profile(), CandidatePreferences(), role_fit_score=95, evidence_fit_score=90)

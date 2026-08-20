@@ -16,11 +16,12 @@ job, or a posting with an incompatible start date. Unknown metadata is shown as
 The local candidate store starts with an editable policy: M.S. Artificial
 Intelligence graduation in December 2026, full-time roles beginning December
 2026 through March 2027, any US location, all three work modes, and AI/ML,
-Data Science, GenAI, and forward-deployed AI as primary families. The last
-family is deliberate for Aryaman's Veloce AgenticOS and product-facing systems
-work. BI, Java-heavy, generic analyst, and broad software roles remain visible
-as adjacent roles. Authorization and clearance stay unknown until the candidate
-answers them.
+Data Science, GenAI, forward-deployed AI, Computer Vision, and MLOps/ML
+Platform as primary families. Forward-deployed and platform work are deliberate
+for Aryaman's Veloce AgenticOS and product-facing systems work; Computer Vision
+is supported by the Bioqube and NUS evidence. BI, Java-heavy, generic analyst,
+and broad software roles remain visible as adjacent roles. Authorization and
+clearance stay unknown until the candidate answers them.
 
 The profile extractor may identify education and evidence, but the UI-owned
 `CandidatePreferences` object is authoritative. Job descriptions and company
