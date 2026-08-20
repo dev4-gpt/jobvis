@@ -22,7 +22,7 @@ import re
 from job_scout.candidate_fit import preferences_from_dict, resume_persona
 from job_scout.config import get_settings
 from job_scout.corpus import build_corpus
-from job_scout.cover_letter_quality import evaluate_cover_letter
+from job_scout.cover_letter_quality import evaluate_cover_letter, requirement_targets
 from job_scout.graph.nodes.rank_jobs import _render_profile
 from job_scout.graph.prompts.tailor import RESEARCH_RULE, TAILOR_PROMPT
 from job_scout.graph.schemas import CandidatePreferences, RankedJob, TailoringPack
@@ -203,10 +203,14 @@ def tailor(state: AgentState) -> dict:
     quality = evaluate_cover_letter(pack.cover_letter, ranked.job.description, "\n".join(item.text for item in corpus.items))
     total_calls = calls + calls_used
     if not quality.passed and total_calls < settings.max_llm_calls_per_run:
+        targets = requirement_targets(ranked.job.description)
+        target_text = "\n".join(f"- {target}" for target in targets[:4]) or "- No explicit requirement text was extracted."
         repair_prompt = (
             f"{prompt}\n\nYour first draft failed this deterministic quality gate: "
             f"{'; '.join(quality.reasons)}. Rewrite only the cover_letter field as a complete 250–350 word "
-            "evidence-first letter. Keep the CV and honesty_note grounded in the corpus."
+            "evidence-first letter. Address at least two distinct requirements below in separate sentences, "
+            "using their concrete wording. Keep the CV and honesty_note grounded in the corpus.\n\n"
+            f"Requirement targets used by the gate:\n{target_text}"
         )
         try:
             repaired, repair_calls = _invoke_tailoring_pack(

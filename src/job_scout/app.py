@@ -568,7 +568,8 @@ def _pack_html(result: TailorResult) -> str:
         quality_html = (
             '<div class="js-fab-warn"><b>⚠ Cover-letter quality gate needs review.</b>'
             f" The draft has {quality.word_count} words, {quality.evidence_matches} evidence points, and "
-            f"{quality.requirement_matches} matched requirements. {escape('; '.join(quality.reasons))}</div>"
+            f"{quality.requirement_matches} matched requirements. {escape('; '.join(quality.reasons))}"
+            f"<br><span class='js-fab-reason'>Gate targets: {escape(' | '.join(quality.requirement_targets[:2]))}</span></div>"
         )
     honesty = ""
     if pack.honesty_note:

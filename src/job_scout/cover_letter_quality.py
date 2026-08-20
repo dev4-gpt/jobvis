@@ -76,6 +76,11 @@ def _requirements(description: str) -> list[str]:
     return marked or sentences[:4]
 
 
+def requirement_targets(description: str) -> list[str]:
+    """Return the concrete job-description clauses used by the quality gate."""
+    return _requirements(description)[:6]
+
+
 def evaluate_cover_letter(letter: str, job_description: str, corpus_text: str) -> CoverLetterQualityReport:
     """Return a reproducible quality report for one draft."""
     from job_scout.graph.schemas import CoverLetterQualityReport
@@ -103,9 +108,10 @@ def evaluate_cover_letter(letter: str, job_description: str, corpus_text: str) -
     if evidence_matches < 2:
         reasons.append("cover letter does not contain two concrete, resume-grounded evidence points")
 
+    requirements = requirement_targets(job_description)
     requirement_matches = 0
     letter_tokens = set(_words(normalized))
-    for requirement in _requirements(job_description):
+    for requirement in requirements:
         tokens = set(_words(requirement))
         if tokens and len(tokens & letter_tokens) >= min(3, max(2, len(tokens) // 4)):
             requirement_matches += 1
@@ -118,6 +124,7 @@ def evaluate_cover_letter(letter: str, job_description: str, corpus_text: str) -
         word_count=word_count,
         evidence_matches=evidence_matches,
         requirement_matches=requirement_matches,
+        requirement_targets=requirements,
         generic_phrases=generic_phrases,
         passed=passed,
         reasons=reasons,

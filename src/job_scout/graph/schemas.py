@@ -317,6 +317,7 @@ class CoverLetterQualityReport(BaseModel):
     word_count: int = 0
     evidence_matches: int = 0
     requirement_matches: int = 0
+    requirement_targets: list[str] = Field(default_factory=list)
     generic_phrases: list[str] = Field(default_factory=list)
     passed: bool = False
     reasons: list[str] = Field(default_factory=list)
