@@ -107,6 +107,13 @@ eval-datasets: ## Push ranking + tailoring datasets to Opik from traces
 evals: ## Show the eval harness usage (each suite prompts for --yes)
 	$(UV_RUN) python scripts/run_evals.py --help
 
+.PHONY: backtest
+backtest: ## Run the deterministic application-pack backtest (CV= PACK= JOB=)
+	@test -n "$(CV)" || (echo "Usage: make backtest CV=/path/to/cv.pdf PACK=/path/to/pack.json JOB=/path/to/job.txt"; exit 2)
+	@test -n "$(PACK)" || (echo "Usage: make backtest CV=/path/to/cv.pdf PACK=/path/to/pack.json JOB=/path/to/job.txt"; exit 2)
+	@test -n "$(JOB)" || (echo "Usage: make backtest CV=/path/to/cv.pdf PACK=/path/to/pack.json JOB=/path/to/job.txt"; exit 2)
+	$(UV_RUN) python scripts/backtest_pack.py --cv "$(CV)" --pack "$(PACK)" --job-description "$(JOB)" $(if $(OUTPUT),--output "$(OUTPUT)",)
+
 .PHONY: queue
 queue: ## Create the Opik annotation queue + feedback definitions
 	$(UV_RUN) python scripts/setup_annotation_queue.py --queue

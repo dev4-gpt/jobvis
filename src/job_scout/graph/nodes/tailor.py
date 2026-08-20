@@ -29,6 +29,7 @@ from job_scout.cover_letter_quality import (
     remove_unconfirmed_policy_sentences,
     requirement_targets,
 )
+from job_scout.evals.backtest import backtest_pack, improve_pack
 from job_scout.graph.nodes.rank_jobs import _render_profile
 from job_scout.graph.prompts.tailor import RESEARCH_RULE, TAILOR_PROMPT
 from job_scout.graph.schemas import (
@@ -681,23 +682,37 @@ def tailor(state: AgentState) -> dict:
         errors.append(
             "tailor: model CV failed the density contract; restored source experience, projects, skills, education, and links"
         )
-    quality = evaluate_cover_letter(
-        pack.cover_letter,
-        ranked.job.description,
-        "\n".join(item.text for item in corpus.items),
-        authorization_status=preferences.authorization_status,
-        sponsorship_policy=preferences.sponsorship_policy,
-        clearance_status=preferences.clearance_status,
-    )
-    if successful_model is not None and not quality.passed and total_calls < settings.max_llm_calls_per_run:
+
+    def evaluate_candidate(candidate: TailoringPack):
+        return backtest_pack(
+            candidate,
+            state.get("cv_text", ""),
+            ranked.job.description,
+            source_links=source_links,
+            candidate_preferences=preferences,
+            research_notes=research,
+            job_context=(
+                f"{ranked.job.title} at {ranked.job.company}",
+                ranked.job.company,
+                ranked.job.description[:_DESCRIPTION_LIMIT],
+            ),
+        )
+
+    def repair_candidate(current: TailoringPack, report, attempt: int):
+        nonlocal total_calls
+        if successful_model is None or total_calls >= settings.max_llm_calls_per_run:
+            return None
         targets = requirement_targets(ranked.job.description)
         target_text = "\n".join(f"- {target}" for target in targets[:4]) or "- No explicit requirement text was extracted."
+        failure_text = "; ".join(report.failures[:6]) or "deterministic backtest did not pass"
         repair_prompt = (
-            f"{prompt}\n\nYour first draft failed this deterministic quality gate: "
-            f"{'; '.join(quality.reasons)}. Rewrite only the cover_letter field as a complete 250–350 word "
-            "evidence-first letter. Address at least two distinct requirements below in separate sentences, "
-            "using their concrete wording. Keep the CV and honesty_note grounded in the corpus.\n\n"
-            f"Requirement targets used by the gate:\n{target_text}"
+            f"{prompt}\n\nThis is bounded self-improvement attempt {attempt}. The current pack failed its "
+            f"deterministic backtest: {failure_text}. Return a complete TailoringPack JSON object that improves "
+            "the failing dimensions while preserving every passing dimension. The cover letter must be a complete "
+            "250–350 word evidence-first letter, address at least two distinct requirements below in separate "
+            "sentences, and use only corpus-grounded candidate evidence. Do not add authorization, sponsorship, "
+            "visa, clearance, domain-study, employer, metric, or company claims not in the source.\n\n"
+            f"Requirement targets used by the backtest:\n{target_text}"
         )
         try:
             repaired, repair_calls = _invoke_tailoring_pack(
@@ -708,32 +723,40 @@ def tailor(state: AgentState) -> dict:
                 max_calls=settings.max_llm_calls_per_run,
             )
         except Exception as exc:
-            errors.append(f"tailor: quality repair could not be completed — {exc}")
-        else:
-            repaired = _preserve_cv_metadata(repaired, profile, source_links)
-            pack = _clean_unconfirmed_policy_claims(repaired, preferences)
-            pack = _clean_unsupported_domain_claims(pack, corpus)
-            pack = _restore_source_headers(pack, corpus)
-            pack, cv_rebuilt = _enforce_cv_contract(
-                pack,
-                profile,
-                corpus,
-                ranked,
-                source_links,
-                preferences,
-            )
-            if cv_rebuilt:
-                errors.append("tailor: repaired model CV was sparse; restored missing source sections")
-            total_calls += repair_calls
-            quality = evaluate_cover_letter(
-                pack.cover_letter,
-                ranked.job.description,
-                "\n".join(item.text for item in corpus.items),
-                authorization_status=preferences.authorization_status,
-                sponsorship_policy=preferences.sponsorship_policy,
-                clearance_status=preferences.clearance_status,
-            )
-    if not quality.passed or _letter_has_grounding_flags(pack, corpus, ranked, research, preferences):
+            errors.append(f"tailor: self-improvement attempt {attempt} failed — {exc}")
+            return None
+        total_calls += repair_calls
+        repaired = _preserve_cv_metadata(repaired, profile, source_links)
+        repaired = _clean_unconfirmed_policy_claims(repaired, preferences)
+        repaired = _clean_unsupported_domain_claims(repaired, corpus)
+        repaired = _restore_source_headers(repaired, corpus)
+        repaired, rebuilt = _enforce_cv_contract(
+            repaired,
+            profile,
+            corpus,
+            ranked,
+            source_links,
+            preferences,
+        )
+        if rebuilt:
+            errors.append(f"tailor: self-improvement attempt {attempt} restored sparse CV sections")
+        return repaired
+
+    improvement = improve_pack(
+        pack,
+        evaluate_candidate,
+        repair_candidate,
+        max_attempts=settings.scout_tailor_max_repairs,
+    )
+    pack = improvement.pack
+    quality = improvement.report.cover_letter_quality
+    if improvement.attempts:
+        errors.append(
+            f"tailor: deterministic backtest ran {len(improvement.history)} version(s); best score {improvement.report.score:.3f}"
+        )
+    if not improvement.report.passed:
+        if improvement.report.failures:
+            errors.append(f"tailor: backtest review — {'; '.join(improvement.report.failures[:5])}")
         # Do not present a persuasive but weak model draft as if it were ready
         # to send. The deterministic fallback is deliberately conservative: it
         # quotes the selected job requirements, copies real corpus evidence, and
@@ -754,6 +777,9 @@ def tailor(state: AgentState) -> dict:
             sponsorship_policy=preferences.sponsorship_policy,
             clearance_status=preferences.clearance_status,
         )
+        final_report = evaluate_candidate(pack)
+        if not final_report.passed:
+            errors.append("tailor: final deterministic backtest still failed — review or regenerate before sending")
         if quality.passed:
             errors.append("tailor: replaced the model letter with a grounded fallback after deterministic review")
         else:

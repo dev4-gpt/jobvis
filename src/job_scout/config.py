@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     scout_fetch_model: str = Field(default="", alias="SCOUT_FETCH_MODEL")
     scout_rank_batch: int = Field(default=4, alias="SCOUT_RANK_BATCH")
     scout_rank_timeout: float = Field(default=45.0, alias="SCOUT_RANK_TIMEOUT")
+    scout_tailor_max_repairs: int = Field(default=2, alias="SCOUT_TAILOR_MAX_REPAIRS", ge=0, le=4)
     scout_max_role_queries: int = Field(default=6, alias="SCOUT_MAX_ROLE_QUERIES")
     scout_query_concurrency: int = Field(default=3, alias="SCOUT_QUERY_CONCURRENCY")
     scout_concurrent_sources: bool = Field(default=True, alias="SCOUT_CONCURRENT_SOURCES")
