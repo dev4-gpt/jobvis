@@ -38,6 +38,13 @@ employment/work mode/clearance signals, then divided into primary, adjacent,
 and blocked/review-required sections. Source diagnostics remain independent so
 a result set that came only from Adzuna is visible as such.
 
+If every configured ranking provider is rate-limited, unavailable, or times
+out, Jobvis does not discard the fetched postings. It emits conservative local
+review scores from exact title/description skill matches, preserves the same
+eligibility blockers, and labels the result as a deterministic review score.
+The reformulation loop stops in that state so the product does not spend more
+model calls repeating a provider outage.
+
 ## Tailoring and application safety
 
 Tailoring chooses a resume persona (AI/ML and Data Science, GenAI/RAG,

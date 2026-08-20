@@ -7,13 +7,14 @@ to its ``JobPosting`` to build a ``RankedJob``.
 from __future__ import annotations
 
 import contextvars
+import re
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 from job_scout.candidate_fit import assess_eligibility, normalize_job, preferences_from_dict
 from job_scout.config import get_settings
 from job_scout.graph.prompts.rank_jobs import RANK_JOBS_PROMPT
-from job_scout.graph.schemas import JobPosting, JobScores, Profile, RankedJob
+from job_scout.graph.schemas import JobPosting, JobScore, JobScores, Profile, RankedJob
 from job_scout.graph.state import AgentState
 from job_scout.llm import ensure_budget, get_chat_model, model_chain, reasoning_kwargs, with_structured_output
 
@@ -66,6 +67,56 @@ def _batches(items: list[JobPosting], size: int) -> Iterator[list[JobPosting]]:
         yield items[i : i + size]
 
 
+def _deterministic_score(job: JobPosting, profile: Profile) -> JobScore:
+    """Produce a conservative score when every ranking provider is unavailable.
+
+    This is deliberately not presented as an LLM judgment. It uses only the
+    normalized title/description, profile roles, and exact skill mentions, so
+    a provider outage still leaves the user with inspectable postings while
+    avoiding invented fit explanations.
+    """
+    normalized = normalize_job(job)
+    haystack = f"{normalized.title} {normalized.description} {' '.join(normalized.tags)}".lower()
+    matched = [
+        skill
+        for skill in profile.skills
+        if skill.strip() and re.search(rf"(?<![a-z0-9]){re.escape(skill.strip().lower())}(?![a-z0-9])", haystack)
+    ]
+    role_match = any(role.strip().lower() in haystack for role in profile.primary_roles if role.strip())
+    # The policy layer will cap, downgrade, or block this score below. Keep the
+    # fallback intentionally middle-of-the-road: exact evidence can lift it,
+    # but it can never masquerade as confident model reasoning.
+    role_fit = min(82, 52 + (14 if role_match else 0) + min(4, len(matched)) * 4)
+    evidence_fit = min(78, 42 + min(6, len(matched)) * 6)
+    gaps = [] if matched else ["No exact profile-skill match was found; inspect the requirements manually."]
+    explanation = (
+        "Deterministic review score: the ranking provider was unavailable. "
+        "Eligibility and matched evidence were computed locally; confirm fit manually."
+    )
+    return JobScore(
+        job_id=normalized.job_id,
+        fit_score=round(role_fit * 0.55 + evidence_fit * 0.45),
+        fit_explanation=explanation,
+        matched_skills=matched[:12],
+        gaps=gaps,
+        role_fit_score=role_fit,
+        evidence_fit_score=evidence_fit,
+    )
+
+
+def _deterministic_scores(jobs: list[JobPosting], profile: Profile) -> JobScores:
+    """Score a batch locally without making another network request."""
+    return JobScores(scores=[_deterministic_score(job, profile) for job in jobs])
+
+
+def _provider_error(exc: Exception | None) -> str:
+    """Keep provider diagnostics useful without dumping a huge raw payload."""
+    if exc is None:
+        return "no configured ranking provider"
+    detail = " ".join(str(exc).split())
+    return f"{type(exc).__name__}: {detail[:240]}"
+
+
 def rank_jobs(state: AgentState) -> dict:
     """Score each fetched job against the profile and return them sorted by fit.
 
@@ -102,15 +153,19 @@ def rank_jobs(state: AgentState) -> dict:
         model_kwargs.update(reasoning_kwargs(model_name))
         return with_structured_output(get_chat_model(model_name, temperature=0.0, **model_kwargs), JobScores, model_name)
 
-    def score_batch(batch: list[JobPosting]) -> tuple[JobScores, int]:
+    def score_batch(batch: list[JobPosting]) -> tuple[JobScores, int, str | None]:
         prompt = RANK_JOBS_PROMPT.format(profile=_render_profile(profile), jobs=_render_jobs(batch))
         last_error: Exception | None = None
         for attempts, model_name in enumerate(models, start=1):
             try:
-                return structured_model(model_name).invoke(prompt), attempts
+                return structured_model(model_name).invoke(prompt), attempts, None
             except Exception as exc:  # noqa: BLE001 - try only explicit fallback models
                 last_error = exc
-        raise RuntimeError(f"All configured ranking models failed ({', '.join(models)}).") from last_error
+        return (
+            _deterministic_scores(batch, profile),
+            len(models),
+            f"ranking providers unavailable; used deterministic review scores ({_provider_error(last_error)})",
+        )
 
     # Batches are independent, so they run concurrently — ranking latency is the
     # slowest batch, not the sum. copy_context() carries LangChain's callback
@@ -124,21 +179,28 @@ def rank_jobs(state: AgentState) -> dict:
         futures = [pool.submit(contextvars.copy_context().run, score_batch, batch) for batch in batches]
         try:
             results = [future.result(timeout=settings.scout_rank_timeout) for future in futures]
-        except TimeoutError as exc:
+        except TimeoutError:
             for future in futures:
                 future.cancel()
             # Do not wait for a provider that ignored its client timeout; the
-            # graph must return a visible failure instead of hanging the UI.
+            # graph must return visible reviewable jobs instead of hanging the
+            # UI or discarding the postings that the sources already returned.
             pool.shutdown(wait=False, cancel_futures=True)
-            raise TimeoutError(
-                f"Ranking exceeded SCOUT_RANK_TIMEOUT={settings.scout_rank_timeout:.0f}s; "
-                "reduce SCOUT_RANK_BATCH or choose a faster model."
-            ) from exc
+            results = [
+                (
+                    _deterministic_scores(batch, profile),
+                    len(models),
+                    f"ranking timed out after SCOUT_RANK_TIMEOUT={settings.scout_rank_timeout:.0f}s; "
+                    "used deterministic review scores",
+                )
+                for batch in batches
+            ]
         else:
             pool.shutdown(wait=True)
-    calls += sum(used_calls for _scores, used_calls in results)
+    calls += sum(used_calls for _scores, used_calls, _diagnostic in results)
+    diagnostics = [diagnostic for _scores, _used_calls, diagnostic in results if diagnostic]
 
-    for result, _used_calls in results:
+    for result, _used_calls, _diagnostic in results:
         for score in result.scores:
             job = by_id.get(score.job_id)
             if job is None:
@@ -185,7 +247,9 @@ def rank_jobs(state: AgentState) -> dict:
                 )
 
     ranked.sort(key=lambda r: (r.eligibility_status == "blocked", r.primary_or_adjacent != "primary", -r.fit_score))
-    return {"ranked_jobs": ranked, "llm_calls": calls}
+    errors = list(state.get("errors") or [])
+    errors.extend(f"rank_jobs: {diagnostic}" for diagnostic in diagnostics)
+    return {"ranked_jobs": ranked, "llm_calls": calls, "errors": errors}
 
 
 def _evidence_score(score) -> int:

@@ -103,6 +103,13 @@ def should_reformulate(state: AgentState) -> str:
     """
     from job_scout.config import get_settings
 
+    # A provider outage is not a thin-search signal. Ranking returns
+    # conservative deterministic review scores so fetched postings remain
+    # visible; another model call would only repeat a rate-limit/timeout
+    # failure and make the UI appear stuck.
+    if any("deterministic review scores" in error or "ranking timed out" in error for error in state.get("errors", [])):
+        return END
+
     cap = min(MAX_REFORMULATIONS, get_settings().scout_max_reformulations)
     ranked = state.get("ranked_jobs", [])
     good = sum(1 for r in ranked if r.fit_score >= GOOD_FIT_THRESHOLD)

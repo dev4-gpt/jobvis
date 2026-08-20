@@ -330,6 +330,36 @@ def test_rank_jobs_uses_explicit_fallback_after_provider_failure(monkeypatch, sa
     assert out["llm_calls"] == 2
 
 
+def test_rank_jobs_keeps_postings_when_all_providers_fail(monkeypatch, sample_profile):
+    """A rate limit must degrade to transparent local scores, not zero results."""
+    failing = structured_llm(None)
+    failing.with_structured_output.return_value.invoke.side_effect = RuntimeError("429 rate limit")
+    monkeypatch.setattr(rank_mod, "get_chat_model", lambda *args, **kwargs: failing)
+    monkeypatch.setattr(
+        rank_mod,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "scout_model": "groq:primary",
+                "scout_fallback_models": "nvidia:fallback",
+                "scout_rank_batch": 4,
+                "scout_rank_timeout": 45.0,
+                "max_llm_calls_per_run": 4,
+            },
+        )(),
+    )
+    jobs = [make_job("j1", "Data Scientist", "Acme")]
+
+    out = rank_jobs({"profile": sample_profile, "jobs": jobs, "llm_calls": 0})
+
+    assert len(out["ranked_jobs"]) == 1
+    assert "Deterministic review score" in out["ranked_jobs"][0].fit_explanation
+    assert any("providers unavailable" in error for error in out["errors"])
+    assert out["llm_calls"] == 2
+
+
 def test_rank_jobs_empty_jobs(sample_profile):
     out = rank_jobs({"profile": sample_profile, "jobs": [], "llm_calls": 0})
     assert out["ranked_jobs"] == []

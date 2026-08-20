@@ -29,6 +29,15 @@ def test_route_ends_when_reformulation_cap_hit():
     assert should_reformulate(state) == END
 
 
+def test_provider_fallback_does_not_trigger_another_model_call():
+    state = {
+        "ranked_jobs": [_ranked(20)],
+        "reformulation_count": 0,
+        "errors": ["rank_jobs: ranking providers unavailable; used deterministic review scores"],
+    }
+    assert should_reformulate(state) == END
+
+
 def test_route_ignores_low_scores_toward_quota():
     # 5 jobs but none >= 60 -> still loops (under cap)
     state = {"ranked_jobs": [_ranked(50)] * 5, "reformulation_count": 1}
