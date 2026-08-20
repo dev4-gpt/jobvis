@@ -296,6 +296,16 @@ def _augment_resume_facts(profile: Profile, cv_text: str) -> Profile:
     return profile.model_copy(update=updates)
 
 
+def refresh_source_facts(profile: Profile, cv_text: str) -> Profile:
+    """Refresh deterministic facts when loading a profile saved by an older build.
+
+    This is intentionally separate from model extraction: reopening the app
+    must not spend another provider call, but a persisted profile should still
+    benefit from fixes to date, education, phone, and experience parsing.
+    """
+    return _augment_resume_facts(profile, cv_text)
+
+
 def _dated_professional_months(cv_text: str) -> int | None:
     """Estimate dated non-academic experience without counting education rows."""
     from job_scout.corpus import build_corpus

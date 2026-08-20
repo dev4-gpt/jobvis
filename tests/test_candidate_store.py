@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -34,6 +35,30 @@ def test_save_load_roundtrip_serializes_profile_dates(tmp_store, sample_profile)
     stored = tmp_store.load_candidate()
     assert stored is not None
     assert stored.profile.expected_graduation_date == date(2026, 12, 1)
+
+
+def test_load_repairs_legacy_profile_timeline_from_saved_cv(tmp_store, sample_profile):
+    legacy_profile = sample_profile.model_copy(
+        update={"expected_graduation_date": None, "education_history": [], "degree_fields": []}
+    )
+    cv_text = (
+        "Aryaman Singh Dev\n"
+        "Penn State M.S. Artificial Intelligence Aug 2025 – Dec 2026\n"
+        "NYU M.S. Computer Engineering Sep 2024 – Aug 2025\n"
+        "Manipal B.Tech. Mechatronics Engineering Aug 2020 – Jul 2024\n"
+        "Data Scientist Jan 2025 – Aug 2025\n"
+        "(484) 735-7279"
+    )
+    payload = {"version": 1, "profile": legacy_profile.model_dump(mode="json"), "cv_text": cv_text}
+    tmp_store._STORE_PATH.write_text(json.dumps(payload), encoding="utf-8")
+
+    stored = tmp_store.load_candidate()
+
+    assert stored is not None
+    assert stored.profile.expected_graduation_date == date(2026, 12, 1)
+    assert stored.profile.current_program == "M.S. Artificial Intelligence"
+    assert [entry.institution for entry in stored.profile.education_history] == ["Penn State", "NYU", "Manipal"]
+    assert stored.profile.phone == "(484) 735-7279"
 
 
 def test_preferences_roundtrip(tmp_store, sample_profile):

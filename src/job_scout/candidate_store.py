@@ -24,6 +24,7 @@ from typing import NamedTuple
 
 from job_scout.candidate_fit import preferences_from_dict
 from job_scout.graph.schemas import CandidatePreferences, CVLink, Profile
+from job_scout.profile import refresh_source_facts
 
 _STORE_DIR = Path(__file__).resolve().parents[2] / "data" / "candidate"
 _STORE_PATH = _STORE_DIR / "profile.json"
@@ -64,9 +65,10 @@ def load_candidate() -> StoredCandidate | None:
     """The stored candidate, or None (never raises)."""
     try:
         payload = json.loads(_STORE_PATH.read_text(encoding="utf-8"))
-        profile = Profile.model_validate(payload["profile"])
+        cv_text = str(payload["cv_text"])
+        profile = refresh_source_facts(Profile.model_validate(payload["profile"]), cv_text)
         links = [CVLink.model_validate(item) for item in payload.get("cv_links", [])]
-        return StoredCandidate(profile, str(payload["cv_text"]), payload.get("preferences"), links)
+        return StoredCandidate(profile, cv_text, payload.get("preferences"), links)
     except (OSError, ValueError, KeyError):
         return None
 
