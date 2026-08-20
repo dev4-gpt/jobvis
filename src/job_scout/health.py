@@ -31,6 +31,23 @@ def _model_readiness(model: str, settings) -> dict[str, object]:
     return {"model": model, "provider": provider, "ready": ready, "credential": credential}
 
 
+def _git_provenance(root: Path) -> dict[str, str]:
+    """Read local branch/commit labels without invoking Git or the network."""
+    try:
+        git_dir = root / ".git"
+        if git_dir.is_file():
+            git_dir = root / git_dir.read_text(encoding="utf-8").strip().removeprefix("gitdir: ")
+        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref: "):
+            ref = head.removeprefix("ref: ")
+            branch = ref.removeprefix("refs/heads/")
+            commit = (git_dir / ref).read_text(encoding="utf-8").strip()
+            return {"branch": branch, "commit": commit[:12]}
+        return {"branch": "detached", "commit": head[:12]}
+    except (OSError, ValueError):
+        return {"branch": "unknown", "commit": "unknown"}
+
+
 def health() -> dict[str, object]:
     """Return non-secret runtime readiness information without network calls."""
     settings = get_settings()
@@ -42,11 +59,15 @@ def health() -> dict[str, object]:
         "tailor": settings.scout_tailor_model or model,
     }
     readiness = {role: _model_readiness(model_name, settings) for role, model_name in models.items()}
+    root = Path(__file__).resolve().parents[2]
+    provenance = _git_provenance(root)
     return {
         "status": "ok",
         "graph": type(graph).__name__,
         "python": sys.executable,
-        "source_root": str(Path(__file__).resolve().parents[2]),
+        "source_root": str(root),
+        "source_branch": provenance["branch"],
+        "source_commit": provenance["commit"],
         "model": model,
         "opik_enabled": settings.opik_enabled,
         "has_llm_key": bool(readiness["scout"]["ready"]),

@@ -103,6 +103,29 @@ def _best_pair_ratio(text: str, references: list[str]) -> float:
     )
 
 
+def _best_token_recall(text: str, references: list[str]) -> float:
+    """Measure grounded vocabulary across several source items.
+
+    A cover-letter sentence commonly combines two or three adjacent project
+    bullets. SequenceMatcher penalizes that legitimate composition because no
+    single bullet contains the full sentence. Select the references with the
+    strongest token overlap, then require most meaningful sentence terms to be
+    present in that small evidence set. This stays local to the best matches;
+    it does not compare against the whole CV as one unrestricted bag of words.
+    """
+    sentence_tokens = set(_normalize(text).split())
+    if len(sentence_tokens) < _MIN_FACTUAL_SENTENCE_WORDS:
+        return 0.0
+    scored = []
+    for reference in references:
+        reference_tokens = set(_normalize(reference).split())
+        scored.append((len(sentence_tokens & reference_tokens), reference_tokens))
+    evidence_tokens: set[str] = set()
+    for _overlap, tokens in sorted(scored, key=lambda item: item[0], reverse=True)[:4]:
+        evidence_tokens.update(tokens)
+    return len(sentence_tokens & evidence_tokens) / len(sentence_tokens)
+
+
 def _looks_factual(sentence: str) -> bool:
     """Whether a cover-letter sentence makes a checkable claim.
 
@@ -111,6 +134,15 @@ def _looks_factual(sentence: str) -> bool:
     (motivation, enthusiasm) is unverifiable by design and skipped.
     """
     if len(sentence.split()) < _MIN_FACTUAL_SENTENCE_WORDS:
+        return False
+    # Explicitly stated gaps are review information, not claims that require
+    # evidence. Positive follow-up claims in the same paragraph remain checked.
+    if re.search(
+        r"\b(?:gap|gaps|do not have|don't have|lack(?:s|ing)?|no prior|not documented|"
+        r"not yet demonstrated|would need to confirm|would confirm)\b",
+        sentence,
+        re.I,
+    ):
         return False
     if re.search(r"\d", sentence):
         return True
@@ -264,7 +296,7 @@ def validate_pack(
         claims_checked += 1
         best = _best_ratio(sentence, references)
         if best < letter_ratio:
-            best = max(best, _best_pair_ratio(sentence, references))
+            best = max(best, _best_pair_ratio(sentence, references), _best_token_recall(sentence, references))
         if best < letter_ratio:
             classification = _claim_classification(best, letter_ratio)
             if classification == "near_miss":

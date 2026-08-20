@@ -27,7 +27,18 @@ def validate_tailoring(state: AgentState) -> dict:
 
     job_id = state.get("selected_job_id")
     ranked = next((r for r in state.get("ranked_jobs", []) if r.job.job_id == job_id), None)
-    job_context = [f"{ranked.job.title} at {ranked.job.company}", ranked.job.company] if ranked else []
+    job_context = []
+    if ranked:
+        # Job-specific requirement language is legitimate context for a cover
+        # letter. Keeping it separate from the CV corpus prevents the
+        # validator from treating a requirement-mapping sentence as fabricated
+        # candidate experience while still checking candidate facts against the
+        # actual corpus.
+        job_context = [
+            f"{ranked.job.title} at {ranked.job.company}",
+            ranked.job.company,
+            ranked.job.description[:3000],
+        ]
 
     report = validate_pack(
         pack,

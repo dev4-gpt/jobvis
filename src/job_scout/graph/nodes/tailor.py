@@ -22,13 +22,19 @@ import re
 from job_scout.candidate_fit import preferences_from_dict, resume_persona
 from job_scout.config import get_settings
 from job_scout.corpus import build_corpus
-from job_scout.cover_letter_quality import evaluate_cover_letter, requirement_targets
+from job_scout.cover_letter_quality import (
+    evaluate_cover_letter,
+    grounded_fallback_letter,
+    remove_unconfirmed_policy_sentences,
+    requirement_targets,
+)
 from job_scout.graph.nodes.rank_jobs import _render_profile
 from job_scout.graph.prompts.tailor import RESEARCH_RULE, TAILOR_PROMPT
 from job_scout.graph.schemas import CandidatePreferences, RankedJob, TailoringPack
 from job_scout.graph.state import AgentState
 from job_scout.llm import ensure_budget, get_chat_model, with_structured_output
 from job_scout.tools.research import research_company
+from job_scout.validation import validate_pack
 
 _DESCRIPTION_LIMIT = 3000
 
@@ -139,6 +145,48 @@ def _render_job(ranked: RankedJob) -> str:
     )
 
 
+def _clean_unconfirmed_policy_claims(pack: TailoringPack, preferences: CandidatePreferences) -> TailoringPack:
+    """Remove unconfirmed authorization/visa/clearance claims before display."""
+    cleaned = pack.model_copy(deep=True)
+    kwargs = {
+        "authorization_status": preferences.authorization_status,
+        "sponsorship_policy": preferences.sponsorship_policy,
+        "clearance_status": preferences.clearance_status,
+    }
+    cleaned.cv.headline = remove_unconfirmed_policy_sentences(cleaned.cv.headline, **kwargs)
+    cleaned.cv.summary = remove_unconfirmed_policy_sentences(cleaned.cv.summary, **kwargs)
+    cleaned.cover_letter = remove_unconfirmed_policy_sentences(cleaned.cover_letter, **kwargs)
+    return cleaned
+
+
+def _letter_has_grounding_flags(pack: TailoringPack, corpus, ranked: RankedJob, research: str | None, preferences) -> bool:
+    """Return whether the cover letter still contains unsupported facts."""
+    report = validate_pack(
+        pack,
+        corpus,
+        research_notes=research,
+        job_context=[
+            f"{ranked.job.title} at {ranked.job.company}",
+            ranked.job.company,
+            ranked.job.description[:3000],
+        ],
+        candidate_preferences=preferences,
+    )
+    return any(flag.where.startswith("cover_letter:") or flag.where.startswith("policy:") for flag in report.flagged)
+
+
+def _fallback_evidence(corpus, ranked: RankedJob) -> list[str]:
+    """Select three corpus items that best match the target role vocabulary."""
+    target = set(re.findall(r"[a-z0-9+#-]{3,}", f"{ranked.job.title} {ranked.job.description}".lower()))
+    items = [item for item in corpus.items if item.kind in {"bullet", "summary"}]
+    ranked_items = sorted(
+        items,
+        key=lambda item: len(target & set(re.findall(r"[a-z0-9+#-]{3,}", item.text.lower()))),
+        reverse=True,
+    )
+    return [item.text for item in ranked_items[:3]]
+
+
 def tailor(state: AgentState) -> dict:
     """Generate a ``TailoringPack`` for ``selected_job_id`` from checkpointed state."""
     settings = get_settings()
@@ -202,6 +250,7 @@ def tailor(state: AgentState) -> dict:
     # Links are source metadata, not LLM content. Re-attach them after every
     # response so a model can never silently discard a clickable resume link.
     pack.cv.links = list(state.get("cv_links", []))
+    pack = _clean_unconfirmed_policy_claims(pack, preferences)
     quality = evaluate_cover_letter(
         pack.cover_letter,
         ranked.job.description,
@@ -233,7 +282,7 @@ def tailor(state: AgentState) -> dict:
             errors.append(f"tailor: quality repair could not be completed — {exc}")
         else:
             repaired.cv.links = list(state.get("cv_links", []))
-            pack = repaired
+            pack = _clean_unconfirmed_policy_claims(repaired, preferences)
             total_calls += repair_calls
             quality = evaluate_cover_letter(
                 pack.cover_letter,
@@ -243,8 +292,31 @@ def tailor(state: AgentState) -> dict:
                 sponsorship_policy=preferences.sponsorship_policy,
                 clearance_status=preferences.clearance_status,
             )
-    if not quality.passed:
-        errors.append("tailor: cover-letter quality gate failed — review or regenerate before sending")
+    if not quality.passed or _letter_has_grounding_flags(pack, corpus, ranked, research, preferences):
+        # Do not present a persuasive but weak model draft as if it were ready
+        # to send. The deterministic fallback is deliberately conservative: it
+        # quotes the selected job requirements, copies real corpus evidence, and
+        # states uncertainty instead of inventing authorization, domain study,
+        # company statistics, or experience.
+        pack.cover_letter = grounded_fallback_letter(
+            candidate_name=profile.name or "Candidate",
+            company=ranked.job.company,
+            job_title=ranked.job.title,
+            job_description=ranked.job.description,
+            corpus_items=_fallback_evidence(corpus, ranked),
+        )
+        quality = evaluate_cover_letter(
+            pack.cover_letter,
+            ranked.job.description,
+            "\n".join(item.text for item in corpus.items),
+            authorization_status=preferences.authorization_status,
+            sponsorship_policy=preferences.sponsorship_policy,
+            clearance_status=preferences.clearance_status,
+        )
+        if quality.passed:
+            errors.append("tailor: replaced the model letter with a grounded fallback after deterministic review")
+        else:
+            errors.append("tailor: cover-letter quality gate failed — review or regenerate before sending")
     return {
         "tailoring": pack if pack.cover_letter.strip() else None,
         "research_notes": research,

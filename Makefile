@@ -28,8 +28,12 @@ app: preflight port-check ## Launch both surfaces: wizard on configured port and
 	$(JOBVIS_WIZARD_ENV) $(JOBVIS_CONSOLE_ENV) $(UV_RUN) python -m job_scout.app
 
 .PHONY: preflight
-preflight: ## Validate imports, graph compilation, and model-role configuration before launch
+preflight: source-check ## Validate imports, graph compilation, and model-role configuration before launch
 	$(UV_RUN) python -m job_scout.health
+
+.PHONY: source-check
+source-check: ## Verify this checkout contains the current import-safe runtime
+	$(UV_RUN) python scripts/runtime_source_check.py
 
 .PHONY: port-check
 port-check: ## Fail clearly if either configured Jobvis port is already occupied
@@ -120,7 +124,7 @@ lint: ## Lint with ruff
 	$(UV_RUN) ruff check .
 
 .PHONY: health
-health: ## Run the keyless import/config health check
+health: source-check ## Run the keyless import/config health check
 	$(UV_RUN) python -m job_scout.health
 
 .PHONY: ci

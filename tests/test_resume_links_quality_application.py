@@ -12,7 +12,12 @@ from pypdf.annotations import Link
 from job_scout.application.answers import AnswerMemory
 from job_scout.application.ats import ApplicantFacts, ATSName, discover_fields, propose_mappings
 from job_scout.application.controller import ApplicationController
-from job_scout.cover_letter_quality import evaluate_cover_letter, policy_claim_violations
+from job_scout.cover_letter_quality import (
+    evaluate_cover_letter,
+    grounded_fallback_letter,
+    policy_claim_violations,
+    remove_unconfirmed_policy_sentences,
+)
 from job_scout.graph.schemas import CVContent, CVLink
 from job_scout.renderer import render_pdf
 from job_scout.tools.cv_reader import extract_cv_document
@@ -75,6 +80,39 @@ def test_cover_letter_quality_rejects_unconfirmed_policy_claims():
     assert report.passed is False
     assert report.policy_violations
     assert policy_claim_violations("Authorization remains unconfirmed.") == []
+
+
+def test_unconfirmed_policy_claims_are_removed_before_rendering():
+    cleaned = remove_unconfirmed_policy_sentences(
+        "AI engineer with Python experience. I am authorized to work in the United States."
+    )
+    assert "authorized to work" not in cleaned.lower()
+    assert "Python experience" in cleaned
+
+
+def test_grounded_fallback_letter_meets_quality_gate_with_two_job_clauses():
+    description = "Candidates must work closely with Software Engineers and Platform teams to deliver Generative AI solutions."
+    letter = grounded_fallback_letter(
+        candidate_name="Person",
+        company="Acme",
+        job_title="AI Engineer",
+        job_description=description,
+        corpus_items=[
+            "Built Python pipelines and measured model outcomes.",
+            "Deployed FastAPI services for reproducible workflows.",
+            "Evaluated scikit-learn models and documented results.",
+        ],
+    )
+    corpus = "\n".join(
+        [
+            "Built Python pipelines and measured model outcomes.",
+            "Deployed FastAPI services for reproducible workflows.",
+            "Evaluated scikit-learn models and documented results.",
+        ]
+    )
+    report = evaluate_cover_letter(letter, description, corpus)
+    assert report.passed is True
+    assert report.requirement_matches >= 2
 
 
 def test_cover_letter_quality_accepts_evidence_and_requirements():

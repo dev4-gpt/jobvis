@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextvars
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlsplit
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -59,23 +60,37 @@ _STRUCTURED_SYSTEM = (
 # padding without letting a skill list through.
 MAX_QUERY_WORDS = 6
 
-_ROLE_QUERIES = (
-    ("ai_ml", "Applied ML Engineer"),
-    ("ai_ml", "AI/ML Engineer"),
-    ("data_science", "Data Scientist"),
-    ("genai", "GenAI Engineer"),
-    ("genai", "LLM RAG Engineer"),
-    ("mlops", "Junior MLOps Engineer"),
-    ("forward_deployed", "Forward Deployed Engineer"),
-    ("forward_deployed", "Solutions Engineer"),
-    ("computer_vision", "Computer Vision Engineer"),
-)
+_ROLE_QUERIES = {
+    "ai_ml": ("Applied ML Engineer", "AI/ML Engineer"),
+    "data_science": ("Data Scientist",),
+    "genai": ("GenAI Engineer", "LLM RAG Engineer"),
+    "forward_deployed": ("Forward Deployed Engineer", "Solutions Engineer"),
+    "mlops": ("Junior MLOps Engineer",),
+    "computer_vision": ("Computer Vision Engineer",),
+}
 
 
 def _candidate_queries(profile, preferences: CandidatePreferences, reformulation_count: int, max_queries: int = 6) -> list[str]:
     """Build bounded title-only queries from the human-selected role families."""
-    families = set(preferences.primary_role_families)
-    queries = [query for family, query in _ROLE_QUERIES if family in families]
+    families = [family for family in preferences.primary_role_families if family in _ROLE_QUERIES]
+    # Round-robin across selected families so a small global cap cannot starve
+    # a user's secondary priority. In particular, the default six queries must
+    # include Forward Deployed Engineer instead of spending all six slots on
+    # AI/ML and GenAI variants.
+    queries: list[str] = []
+    round_number = 0
+    while families and len(queries) < max(1, max_queries):
+        added = False
+        for family in families:
+            family_queries = _ROLE_QUERIES[family]
+            if round_number < len(family_queries):
+                queries.append(family_queries[round_number])
+                added = True
+                if len(queries) >= max(1, max_queries):
+                    break
+        if not added:
+            break
+        round_number += 1
     if not queries:
         queries = ["Data Scientist"]
     if reformulation_count and len(queries) > 1:
@@ -108,7 +123,6 @@ def fetch_jobs(state: AgentState) -> dict:
     """Run the job search with LLM-chosen arguments and merge results into state."""
     settings = get_settings()
     calls = state.get("llm_calls", 0)
-    ensure_budget(calls, 1, settings.max_llm_calls_per_run)
     profile = state["profile"]
     errors = list(state.get("errors", []))
 
@@ -134,7 +148,7 @@ def fetch_jobs(state: AgentState) -> dict:
                 query=query,
                 location=location,
                 country=country,
-                remote="remote" in preferences.accepted_work_modes,
+                remote=_remote_only(preferences),
                 limit=max(3, settings.scout_max_jobs // 2),
             )
 
@@ -183,6 +197,11 @@ def fetch_jobs(state: AgentState) -> dict:
             "errors": errors,
             "llm_calls": calls,
         }
+
+    # The legacy path below asks a model to formulate one search query. The
+    # candidate-aware path above is fully deterministic and intentionally costs
+    # zero LLM calls, so only enforce the budget when a call is actually made.
+    ensure_budget(calls, 1, settings.max_llm_calls_per_run)
 
     # Choosing tool arguments is a trivial call — SCOUT_FETCH_MODEL lets a
     # small/fast model do it (~1s instead of ~3s) without touching ranking.
@@ -266,6 +285,12 @@ def _authoritative_location(profile, *, model_country: str | None = None) -> tup
     return None, model_country
 
 
+def _remote_only(preferences: CandidatePreferences) -> bool:
+    """Set source-level remote filtering only when remote is the sole choice."""
+    modes = {mode.strip().lower() for mode in preferences.accepted_work_modes}
+    return modes == {"remote"}
+
+
 def _trim_query(query: str) -> tuple[str, str]:
     """Cut a query back to a title-length phrase.
 
@@ -295,5 +320,11 @@ def _dedupe_with_existing(existing: list[JobPosting], new: list[JobPosting]) -> 
 def _stable_identity(job: JobPosting) -> str:
     """Prefer the apply URL; fall back to a normalized title/company identity."""
     if job.url:
-        return "|".join((job.url.strip().lower().rstrip("/"), job.title.strip().lower(), job.company.strip().lower()))
+        parsed = urlsplit(job.url.strip().lower())
+        # A root placeholder such as https://example.com carries no posting
+        # identity; retain the title/company fallback for fixtures and broken
+        # adapters. Real apply URLs use their path as the stable key even when
+        # aggregators change the displayed title or tracking query string.
+        if parsed.path not in {"", "/"}:
+            return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
     return "|".join((job.title.strip().lower(), job.company.strip().lower(), job.location.strip().lower()))

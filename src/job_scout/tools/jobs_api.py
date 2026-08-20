@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 from langchain_core.tools import tool
@@ -323,9 +324,10 @@ def _dedupe(jobs: list[JobPosting]) -> list[JobPosting]:
     seen: set[str] = set()
     out: list[JobPosting] = []
     for job in jobs:
+        parsed = urlsplit(job.url.strip().lower()) if job.url else None
         key = (
-            "|".join((job.url.strip().lower().rstrip("/"), job.title.strip().lower(), job.company.strip().lower()))
-            if job.url
+            f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
+            if parsed and parsed.path not in {"", "/"}
             else "|".join((job.title.strip().lower(), job.company.strip().lower(), job.location.strip().lower()))
         )
         if key not in seen:

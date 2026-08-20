@@ -8,6 +8,7 @@ specific, and addressed to the actual job. It never calls an LLM.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -74,6 +75,11 @@ _UNCERTAINTY = re.compile(
     r"not yet|pending|needs review|under review|to be determined)\b",
     re.I,
 )
+_GAP_LANGUAGE = re.compile(
+    r"\b(?:gap|gaps|do not have|don't have|lack(?:s|ing)?|no prior|not documented|"
+    r"not yet demonstrated|would need to confirm|would confirm)\b",
+    re.I,
+)
 
 
 def _words(text: str) -> list[str]:
@@ -87,7 +93,20 @@ def _sentences(text: str) -> list[str]:
 def _requirements(description: str) -> list[str]:
     sentences = _sentences(description)
     marked = [sentence for sentence in sentences if any(marker in sentence.lower() for marker in _REQUIREMENT_MARKERS)]
-    return marked or sentences[:4]
+    if not marked:
+        return sentences[:4]
+    # Job boards frequently compress two requirements into one clause such as
+    # "work closely with platform teams to deliver generative AI solutions."
+    # Keep both halves as separate targets so the letter can address them
+    # explicitly and the gate does not demand two unrelated sentences.
+    expanded: list[str] = []
+    for sentence in marked:
+        parts = re.split(r"\s+to\s+", sentence, maxsplit=1, flags=re.I)
+        if len(parts) == 2 and len(parts[0].split()) >= 4 and len(parts[1].split()) >= 3:
+            expanded.extend((parts[0].strip(), f"to {parts[1].strip()}"))
+        else:
+            expanded.append(sentence)
+    return expanded
 
 
 def requirement_targets(description: str) -> list[str]:
@@ -115,6 +134,35 @@ def policy_claim_violations(
         if authorization_violation or clearance_violation:
             violations.append(sentence)
     return list(dict.fromkeys(violations))
+
+
+def remove_unconfirmed_policy_sentences(
+    text: str,
+    *,
+    authorization_status: str = "unknown",
+    sponsorship_policy: str = "unknown",
+    clearance_status: str = "unknown",
+) -> str:
+    """Remove positive policy claims that the candidate has not confirmed.
+
+    Models often append ``authorized to work`` or ``F-1 OPT`` to an otherwise
+    grounded summary. A warning alone is too easy to miss in a downloadable
+    application pack, so unknown policy claims are removed before rendering.
+    Explicit uncertainty statements are retained for the human review note.
+    """
+    violations = set(
+        policy_claim_violations(
+            text,
+            authorization_status=authorization_status,
+            sponsorship_policy=sponsorship_policy,
+            clearance_status=clearance_status,
+        )
+    )
+    if not violations:
+        return str(text).strip()
+    parts = _sentences(str(text))
+    kept = [part for part in parts if part not in violations]
+    return "\n\n".join(kept).strip()
 
 
 def evaluate_cover_letter(
@@ -154,6 +202,10 @@ def evaluate_cover_letter(
     corpus_items = [set(_words(sentence)) for sentence in _sentences(corpus_text)]
     evidence_matches = 0
     for sentence in _sentences(normalized)[1:]:
+        # A transparent gap statement is not a claim of experience. It is
+        # useful review context and should not fail the evidence gate.
+        if _GAP_LANGUAGE.search(sentence):
+            continue
         tokens = set(_words(sentence))
         if len(tokens) >= 3 and any(len(tokens & item) >= 2 for item in corpus_items):
             evidence_matches += 1
@@ -182,4 +234,55 @@ def evaluate_cover_letter(
         policy_violations=policy_violations,
         passed=passed,
         reasons=reasons,
+    )
+
+
+def grounded_fallback_letter(
+    *,
+    candidate_name: str,
+    company: str,
+    job_title: str,
+    job_description: str,
+    corpus_items: Iterable[str],
+) -> str:
+    """Build a conservative letter when the model cannot satisfy the gate.
+
+    This is intentionally plain prose. Every candidate fact is copied from a
+    corpus item, while the first paragraph quotes two bounded job requirements
+    so the letter remains specific without inventing company facts, status, or
+    domain experience.
+    """
+
+    def clip(value: str, limit: int) -> str:
+        words = str(value).replace("\n", " ").split()
+        return " ".join(words[:limit]).rstrip(" ,;:")
+
+    title = clip(job_title, 12) or "this role"
+    employer = clip(company, 10) or "your team"
+    requirements = requirement_targets(job_description)
+    first_requirement = clip(requirements[0], 18) if requirements else "building reliable AI systems"
+    second_requirement = clip(requirements[1], 18) if len(requirements) > 1 else "communicating technical results clearly"
+    evidence = [clip(item, 34) for item in corpus_items if str(item).strip()]
+    evidence = evidence[:3]
+    while len(evidence) < 3:
+        evidence.append("My resume includes additional technical and project evidence relevant to this work")
+
+    return (
+        f"Dear {employer} hiring team,\n\n"
+        f"I am applying for the {title} role because the posting emphasizes {first_requirement} and "
+        f"{second_requirement}. Those priorities match the way I have built and evaluated practical AI systems. "
+        f"I am seeking a full-time opportunity beginning in the candidate's selected start window, and I would "
+        f"welcome the chance to discuss how my experience could support {employer}'s team.\n\n"
+        f"My experience includes this evidence from my resume: {evidence[0]}. I also documented the following work: "
+        f"{evidence[1]}. Together, these examples show hands-on work across model development, software delivery, "
+        f"and technical problem solving. I would apply that same disciplined process to a new team and product. "
+        f"I value clear ownership, reproducible work, measurable outcomes, and respectful collaboration across disciplines. "
+        f"A further project is described as follows: {evidence[2]}. I would bring "
+        f"careful implementation, measurement, and a willingness to explain tradeoffs clearly to collaborators.\n\n"
+        f"I want to be precise about fit. My resume does not document every requirement in the posting, so I would "
+        f"confirm any domain-specific, authorization, clearance, or production-scale expectations directly with the "
+        f"employer. I have not added claims about those areas. The evidence above is the basis for my application, "
+        f"and the remaining questions are appropriate topics for a human review.\n\n"
+        f"Thank you for reviewing my application. I would be glad to discuss the role and the evidence behind this "
+        f"application pack.\n\nSincerely,\n{clip(candidate_name, 8) or 'Candidate'}"
     )

@@ -135,6 +135,33 @@ def test_fetch_jobs_uses_role_family_fanout_for_candidate_preferences(monkeypatc
     assert len(out["jobs"]) == 4
 
 
+def test_default_candidate_queries_include_forward_deployed_roles():
+    from job_scout.graph.nodes.fetch_jobs import _candidate_queries
+
+    prefs = CandidatePreferences()
+    queries = _candidate_queries(None, prefs, 0, max_queries=6)
+    assert "Forward Deployed Engineer" in queries
+
+
+def test_candidate_search_does_not_filter_hybrid_or_onsite_when_all_modes_are_accepted(monkeypatch, sample_profile, sample_jobs):
+    captured = []
+
+    def fake_run_search(**kwargs):
+        captured.append(kwargs)
+        return [sample_jobs[0]], ["cache"]
+
+    monkeypatch.setattr(fetch_mod, "run_search", fake_run_search)
+    out = fetch_jobs(
+        {
+            "profile": sample_profile,
+            "candidate_preferences": CandidatePreferences(primary_role_families=["ai_ml"]),
+            "llm_calls": 0,
+        }
+    )
+    assert out["jobs"]
+    assert captured and all(item["remote"] is False for item in captured)
+
+
 def test_candidate_role_fanout_honors_global_job_cap(monkeypatch, sample_profile, sample_jobs):
     """Multiple role queries must not bypass the ranking budget."""
 
@@ -164,6 +191,22 @@ def test_candidate_role_fanout_honors_global_job_cap(monkeypatch, sample_profile
     prefs = CandidatePreferences(country_scope="us", primary_role_families=["ai_ml", "genai"])
     out = fetch_jobs({"profile": sample_profile, "candidate_preferences": prefs, "llm_calls": 0})
     assert len(out["jobs"]) == 6
+
+
+def test_candidate_role_fanout_does_not_spend_or_require_an_llm_call(monkeypatch, sample_profile, sample_jobs):
+    monkeypatch.setattr(fetch_mod, "run_search", lambda **k: ([sample_jobs[0]], ["cache"]))
+    monkeypatch.setattr(
+        fetch_mod,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {"scout_max_jobs": 3, "scout_max_role_queries": 1, "scout_query_concurrency": 1, "max_llm_calls_per_run": 0},
+        )(),
+    )
+    prefs = CandidatePreferences(country_scope="us", primary_role_families=["ai_ml"])
+    out = fetch_jobs({"profile": sample_profile, "candidate_preferences": prefs, "llm_calls": 0})
+    assert out["llm_calls"] == 0
 
 
 def test_rank_jobs_batches_by_five(monkeypatch, sample_profile):
