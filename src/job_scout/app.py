@@ -1499,12 +1499,19 @@ def main() -> None:
     keeps the main thread, as it prefers to.
     """
     from job_scout.api import CONSOLE_PORT, WIZARD_PORT, serve_in_thread
+    from job_scout.health import runtime_identity
 
     if WIZARD_PORT == CONSOLE_PORT:
         raise RuntimeError(f"Jobvis wizard and console must use different ports, got :{WIZARD_PORT} for both")
     _assert_port_available(WIZARD_PORT, "wizard")
     _assert_port_available(CONSOLE_PORT, "console")
     serve_in_thread()
+    identity = runtime_identity()
+    print(
+        "Jobvis source: "
+        f"{identity['source_root']} "
+        f"(branch={identity['source_branch']}, commit={identity['source_commit']})"
+    )
     print(f"Jobvis console: http://localhost:{CONSOLE_PORT}")
     build_app().launch(server_name="127.0.0.1", server_port=WIZARD_PORT, theme=THEME, css=CSS)
 

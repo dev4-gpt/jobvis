@@ -46,3 +46,18 @@ def test_app_import_succeeds_from_src_layout() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_runtime_source_check_reports_identity() -> None:
+    """The launch preflight must identify the checkout that is actually running."""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "runtime_source_check.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "branch=" in result.stdout
+    assert "commit=" in result.stdout
+    assert str(ROOT) in result.stdout

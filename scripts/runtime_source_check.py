@@ -6,6 +6,23 @@ import sys
 from pathlib import Path
 
 
+def _identity(root: Path) -> tuple[str, str]:
+    """Read branch and commit without invoking Git or contacting a remote."""
+    try:
+        git_dir = root / ".git"
+        if git_dir.is_file():
+            git_dir = root / git_dir.read_text(encoding="utf-8").strip().removeprefix("gitdir: ")
+        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref: "):
+            ref = head.removeprefix("ref: ")
+            branch = ref.removeprefix("refs/heads/")
+            commit = (git_dir / ref).read_text(encoding="utf-8").strip()
+            return branch, commit[:12]
+        return "detached", head[:12]
+    except (OSError, ValueError):
+        return "unknown", "unknown"
+
+
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     graph_init = root / "src" / "job_scout" / "graph" / "__init__.py"
@@ -26,7 +43,8 @@ def main() -> int:
         )
         return 1
 
-    print(f"Jobvis source check: OK ({root})")
+    branch, commit = _identity(root)
+    print(f"Jobvis source check: OK ({root}; branch={branch}; commit={commit})")
     return 0
 
 

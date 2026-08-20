@@ -48,6 +48,17 @@ def _git_provenance(root: Path) -> dict[str, str]:
         return {"branch": "unknown", "commit": "unknown"}
 
 
+def runtime_identity() -> dict[str, str]:
+    """Return the local source identity used by launch diagnostics."""
+    root = Path(__file__).resolve().parents[2]
+    provenance = _git_provenance(root)
+    return {
+        "source_root": str(root),
+        "source_branch": provenance["branch"],
+        "source_commit": provenance["commit"],
+    }
+
+
 def health() -> dict[str, object]:
     """Return non-secret runtime readiness information without network calls."""
     settings = get_settings()
@@ -59,15 +70,12 @@ def health() -> dict[str, object]:
         "tailor": settings.scout_tailor_model or model,
     }
     readiness = {role: _model_readiness(model_name, settings) for role, model_name in models.items()}
-    root = Path(__file__).resolve().parents[2]
-    provenance = _git_provenance(root)
+    identity = runtime_identity()
     return {
         "status": "ok",
         "graph": type(graph).__name__,
         "python": sys.executable,
-        "source_root": str(root),
-        "source_branch": provenance["branch"],
-        "source_commit": provenance["commit"],
+        **identity,
         "model": model,
         "opik_enabled": settings.opik_enabled,
         "has_llm_key": bool(readiness["scout"]["ready"]),
