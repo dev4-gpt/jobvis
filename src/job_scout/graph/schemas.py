@@ -13,10 +13,11 @@ checkpointer (e.g. Postgres) this would have required a real migration.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Seniority = Literal["junior", "mid", "senior", "lead", "unknown"]
 JobSourceName = Literal["jsearch", "adzuna", "remotive", "cache"]
@@ -218,6 +219,91 @@ class TailoringPack(BaseModel):
     cv: CVContent
     cover_letter: str
     honesty_note: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_model_variants(cls, value: object) -> object:
+        """Normalize older/looser JSON shapes before strict typed validation.
+
+        JSON mode is intentionally used with OpenRouter because many models do
+        not implement the provider's parsed Structured Outputs envelope. Those
+        models may still follow an earlier prompt contract (``name`` for a
+        project, object-shaped education, or label-only links). Normalize only
+        those representation differences here; the resulting object remains a
+        strict ``TailoringPack`` and is still checked by the grounding gate.
+        """
+        if not isinstance(value, dict):
+            return value
+        cv_value = value.get("cv")
+        if not isinstance(cv_value, dict):
+            return value
+        cv = dict(cv_value)
+
+        summary = str(cv.get("summary") or "").strip()
+        if not cv.get("headline"):
+            first_sentence = re.split(r"[.!?]", summary, maxsplit=1)[0].strip()
+            cv["headline"] = first_sentence[:140] or "Tailored application"
+
+        for field in ("experience", "projects"):
+            entries = cv.get(field)
+            if not isinstance(entries, list):
+                continue
+            normalized_entries: list[dict] = []
+            for raw_entry in entries:
+                if not isinstance(raw_entry, dict):
+                    continue
+                entry = dict(raw_entry)
+                if field == "projects":
+                    entry.setdefault("role", entry.pop("name", "Project"))
+                    entry.setdefault("company", "Project")
+                else:
+                    entry.setdefault("role", entry.pop("title", ""))
+                    entry.setdefault("company", "")
+                if not entry.get("dates"):
+                    start = entry.pop("start", "")
+                    end = entry.pop("end", "")
+                    entry["dates"] = " – ".join(str(part) for part in (start, end) if part)
+                # A project description is not a corpus-grounded bullet and
+                # has no place in the current CV contract. The selected
+                # corpus-ref bullets are the authoritative project evidence.
+                entry.pop("description", None)
+                entry.pop("location", None)
+                entry.pop("links", None)
+                normalized_entries.append(entry)
+            cv[field] = normalized_entries
+
+        education = cv.get("education")
+        if isinstance(education, list):
+            rendered_education: list[str] = []
+            for item in education:
+                if isinstance(item, dict):
+                    institution = str(item.get("institution") or "").strip()
+                    degree = str(item.get("degree") or "").strip()
+                    graduation = str(item.get("graduation") or "").strip()
+                    line = " — ".join(part for part in (institution, degree) if part)
+                    if graduation:
+                        line = f"{line} ({graduation})" if line else graduation
+                    if line:
+                        rendered_education.append(line)
+                elif isinstance(item, str):
+                    rendered_education.append(item)
+            cv["education"] = rendered_education
+
+        links = cv.get("links")
+        if isinstance(links, list):
+            normalized_links: list[dict] = []
+            for item in links:
+                if isinstance(item, str):
+                    normalized_links.append({"label": item, "url": "", "page": 1, "source": "llm_label"})
+                elif isinstance(item, dict):
+                    link = dict(item)
+                    link.setdefault("page", 1)
+                    normalized_links.append(link)
+            cv["links"] = normalized_links
+
+        result = dict(value)
+        result["cv"] = cv
+        return result
 
 
 class CoverLetterQualityReport(BaseModel):

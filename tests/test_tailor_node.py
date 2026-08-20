@@ -151,3 +151,30 @@ def test_empty_openrouter_structured_envelope_recovers_with_validated_json(monke
     assert isinstance(update["tailoring"], TailoringPack)
     assert update["llm_calls"] == 6  # typed attempt + recovery + bounded quality repair
     assert not any("no draft was created" in error for error in update["errors"])
+
+
+def test_legacy_tailoring_json_is_normalized_before_validation():
+    pack = TailoringPack.model_validate(
+        {
+            "cv": {
+                "summary": "AI/ML engineer building production systems.",
+                "projects": [
+                    {
+                        "name": "Legal Document Analyzer",
+                        "description": "RAG system",
+                        "bullets": [{"text": "Built retrieval", "corpus_ref": "cv-bullet-019"}],
+                        "links": ["GitHub"],
+                    }
+                ],
+                "education": [{"institution": "Penn State", "degree": "M.S. AI", "graduation": "2026-12"}],
+                "links": [{"label": "Portfolio", "url": "https://example.com"}],
+            },
+            "cover_letter": "Evidence-backed letter.",
+        }
+    )
+
+    assert pack.cv.headline == "AI/ML engineer building production systems"
+    assert pack.cv.projects[0].role == "Legal Document Analyzer"
+    assert pack.cv.projects[0].company == "Project"
+    assert pack.cv.education == ["Penn State — M.S. AI (2026-12)"]
+    assert pack.cv.links[0].page == 1
