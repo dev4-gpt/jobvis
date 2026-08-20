@@ -75,6 +75,19 @@ def test_anywhere_us_accepts_all_work_modes_without_location_penalty():
     assert assessment.start_timing_fit == "compatible"
 
 
+def test_start_month_outside_window_is_blocked_even_when_year_matches():
+    job = normalize_job(_job("AI Engineer", "Full-time onsite role starting January 2026; Python and RAG."))
+    assessment = assess_eligibility(job, _profile(), CandidatePreferences(), role_fit_score=88, evidence_fit_score=80)
+    assert assessment.start_timing_fit == "outside_window"
+    assert "start date outside target window" in assessment.hard_blockers
+
+
+def test_iso_start_date_inside_window_is_compatible():
+    job = normalize_job(_job("AI Engineer", "Full-time role; anticipated start 2027-02-01; Python and RAG."))
+    assessment = assess_eligibility(job, _profile(), CandidatePreferences(), role_fit_score=88, evidence_fit_score=80)
+    assert assessment.start_timing_fit == "compatible"
+
+
 def test_adjacent_roles_are_separate_and_capped():
     job = normalize_job(_job("BI Analyst", "Full-time hybrid role starting December 2026."))
     assert role_bucket(job, CandidatePreferences()) == "adjacent"

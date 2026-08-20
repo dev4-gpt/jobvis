@@ -9,6 +9,7 @@ overriding the candidate's choices.
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
@@ -32,6 +33,32 @@ _NO_SPONSOR = re.compile(r"\b(no sponsorship|without sponsorship|must be authori
 _REMOTE = re.compile(r"\b(remote|work from home|distributed)\b", re.I)
 _HYBRID = re.compile(r"\b(hybrid)\b", re.I)
 _ONSITE = re.compile(r"\b(on[- ]?site|in[- ]office|in office)\b", re.I)
+_MONTHS = {
+    "january": 1,
+    "jan": 1,
+    "february": 2,
+    "feb": 2,
+    "march": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
+    "may": 5,
+    "june": 6,
+    "jun": 6,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "december": 12,
+    "dec": 12,
+}
 
 PRIMARY_FAMILY_TERMS = {
     "ai_ml": ("machine learning", "ml engineer", "ai engineer", "ai/ml", "applied ml", "deep learning"),
@@ -220,14 +247,31 @@ def _start_fit(job: JobPosting, preferences: CandidatePreferences) -> tuple[str,
         text = start_match.group(0) if start_match else ""
     if not text.strip() or not (preferences.target_start_min or preferences.target_start_max):
         return "unknown", ["Start timing is not stated; confirm it with the employer."]
+    month_pattern = "|".join(sorted(_MONTHS, key=len, reverse=True))
+    month_dates = [
+        date(int(year), _MONTHS[month.lower()], 1)
+        for month, year in re.findall(rf"\b({month_pattern})\.?\s+(20\d{{2}})\b", text, re.I)
+    ]
+    iso_dates: list[date] = []
+    for year, month, day in re.findall(r"\b(20\d{2})[-/](\d{1,2})(?:[-/](\d{1,2}))?\b", text):
+        try:
+            iso_dates.append(date(int(year), int(month), int(day or 1)))
+        except ValueError:
+            continue
+    exact_dates = month_dates + iso_dates
     years = [int(y) for y in re.findall(r"\b(20\d{2})\b", text)]
-    if not years:
+    if not exact_dates and not years:
         return "unknown", ["Start timing is ambiguous; confirm it with the employer."]
     min_year = preferences.target_start_min.year if preferences.target_start_min else None
     max_year = preferences.target_start_max.year if preferences.target_start_max else None
-    if any((min_year is None or year >= min_year) and (max_year is None or year <= max_year) for year in years):
-        return "compatible", []
-    if any(year == (min_year or max_year) for year in years):
+    if exact_dates:
+        start_date = exact_dates[0]
+        if (preferences.target_start_min is None or start_date >= preferences.target_start_min) and (
+            preferences.target_start_max is None or start_date <= preferences.target_start_max
+        ):
+            return "compatible", []
+        return "outside_window", ["The stated start timing falls outside the selected window."]
+    if any(year in {min_year, max_year} for year in years):
         return "borderline", ["The posting mentions a nearby start year; verify the exact start date."]
     return "outside_window", ["The stated start timing falls outside the selected window."]
 
