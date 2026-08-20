@@ -26,7 +26,7 @@ requirement matches, and the CV density contract passed (653 words, 25 bullets,
 3 experience entries, 4 projects, 35 skills). No remote push or deployment was
 performed.
 
-Verified on 2026-08-13 from branch `codex/harden-job-agent`.
+Verified locally on 2026-08-20 from branch `main`.
 
 ## Passing checks
 
