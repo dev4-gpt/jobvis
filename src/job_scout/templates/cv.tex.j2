@@ -63,7 +63,7 @@
 
 <% if cv.skills %>
 \sectionrule{Skills}
-<< cv.skills | map('tex') | join(' \\textbullet{} ') >>
+<< cv.skills | map('ats') | join(' \\textbullet{} ') >>
 <% endif %>
 
 <% if cv.education %>

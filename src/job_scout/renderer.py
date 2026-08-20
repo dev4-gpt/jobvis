@@ -67,6 +67,19 @@ def latex_url(text: str) -> str:
     return latex_escape(text).replace(r"\textbackslash{}", r"\textbackslash{}")
 
 
+def latex_ats(text: str) -> str:
+    """Escape a skill while keeping adjacent acronyms extractable as one word.
+
+    Tectonic's bundled T1 font can emit unusually wide glyph gaps for runs such
+    as ``AWS`` and ``FAISS``. PDF text extractors then report ``A WS`` and
+    ``F AISS`` even though the visual text is correct. A tiny negative kern
+    between adjacent capital letters preserves the visual layout and keeps
+    these ATS keywords contiguous; ordinary prose is not touched.
+    """
+    escaped = latex_escape(text)
+    return re.sub(r"(?<=[A-Z])(?=[A-Z])", r"\\kern-0.08em{}", escaped)
+
+
 def _environment() -> Environment:
     """Jinja2 env with LaTeX-safe delimiters (``<< >>`` / ``<% %>``)."""
     env = Environment(
@@ -83,6 +96,7 @@ def _environment() -> Environment:
     )
     env.filters["tex"] = latex_escape
     env.filters["urltex"] = latex_url
+    env.filters["ats"] = latex_ats
     return env
 
 

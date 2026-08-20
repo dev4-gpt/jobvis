@@ -68,6 +68,7 @@ def test_render_tex_escapes_user_content():
     assert r"C\&A Analytics" in tex
     assert r"20\%" in tex
     assert r"smart\_caching" in tex
+    assert r"S\kern-0.08em{}Q" in tex
     # No unescaped specials sneak through from user values.
     assert "Jane & Co" not in tex
 
