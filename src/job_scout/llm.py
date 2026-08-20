@@ -75,6 +75,19 @@ def model_chain(primary: str, fallback_models: str = "") -> tuple[str, ...]:
     return tuple(dict.fromkeys([item.strip() for item in (primary, *fallback_models.split(",")) if item.strip()]))
 
 
+def reasoning_kwargs(provider_model: str) -> dict[str, str]:
+    """Return only reasoning parameters supported by the selected model family.
+
+    Groq's Qwen models reject ``reasoning_effort=none`` while GPT-OSS models
+    require one of ``low``, ``medium``, or ``high``. Omitting the parameter is
+    the portable default for every other provider/model combination.
+    """
+    model_id = provider_model.split(":", 1)[-1].lower()
+    if "gpt-oss" in model_id:
+        return {"reasoning_effort": "low"}
+    return {}
+
+
 def with_structured_output(model: BaseChatModel, schema: type, provider_model: str) -> object:
     """Bind a typed response using the provider's most reliable protocol.
 

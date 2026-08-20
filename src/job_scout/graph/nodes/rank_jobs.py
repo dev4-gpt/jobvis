@@ -15,7 +15,7 @@ from job_scout.config import get_settings
 from job_scout.graph.prompts.rank_jobs import RANK_JOBS_PROMPT
 from job_scout.graph.schemas import JobPosting, JobScores, Profile, RankedJob
 from job_scout.graph.state import AgentState
-from job_scout.llm import ensure_budget, get_chat_model, model_chain, with_structured_output
+from job_scout.llm import ensure_budget, get_chat_model, model_chain, reasoning_kwargs, with_structured_output
 
 # Batch size is a latency knob (SCOUT_RANK_BATCH): output tokens — and so batch
 # latency — scale with jobs per batch, and batches run in parallel, so smaller
@@ -99,9 +99,7 @@ def rank_jobs(state: AgentState) -> dict:
 
     def structured_model(model_name: str):
         model_kwargs = {"timeout": settings.scout_rank_timeout, "max_retries": 1}
-        if model_name.startswith("groq:"):
-            # Qwen exposes ``none``; GPT-OSS requires one of low/medium/high.
-            model_kwargs["reasoning_effort"] = "low" if "openai/gpt-oss" in model_name else "none"
+        model_kwargs.update(reasoning_kwargs(model_name))
         return with_structured_output(get_chat_model(model_name, temperature=0.0, **model_kwargs), JobScores, model_name)
 
     def score_batch(batch: list[JobPosting]) -> tuple[JobScores, int]:

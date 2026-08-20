@@ -6,7 +6,7 @@ import os
 from unittest.mock import MagicMock
 
 from job_scout.config import get_settings
-from job_scout.llm import _export_provider_env, with_structured_output
+from job_scout.llm import _export_provider_env, reasoning_kwargs, with_structured_output
 
 
 def test_openrouter_settings_export_to_openai_compatible_client(monkeypatch):
@@ -62,3 +62,11 @@ def test_nvidia_nim_model_uses_its_own_openai_compatible_endpoint(monkeypatch):
     assert type(model).__name__ == "ChatOpenAI"
     assert model.model_name == "openai/gpt-oss-20b"
     assert str(model.openai_api_base).rstrip("/") == "https://integrate.api.nvidia.com/v1"
+
+
+def test_reasoning_kwargs_omit_unsupported_none_for_qwen():
+    assert reasoning_kwargs("groq:qwen/qwen3.6-27b") == {}
+
+
+def test_reasoning_kwargs_use_low_for_gpt_oss():
+    assert reasoning_kwargs("groq:openai/gpt-oss-20b") == {"reasoning_effort": "low"}

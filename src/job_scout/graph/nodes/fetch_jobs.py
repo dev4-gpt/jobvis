@@ -17,7 +17,7 @@ from job_scout.candidate_fit import preferences_from_dict
 from job_scout.config import get_settings
 from job_scout.graph.schemas import CandidatePreferences, JobPosting, SearchRequest, SourceDiagnostic
 from job_scout.graph.state import AgentState
-from job_scout.llm import ensure_budget, get_chat_model, model_chain, with_structured_output
+from job_scout.llm import ensure_budget, get_chat_model, model_chain, reasoning_kwargs, with_structured_output
 from job_scout.tools.jobs_api import location_to_country, search_jobs
 from job_scout.tools.jobs_api import run_search_detailed as run_search
 
@@ -221,12 +221,11 @@ def fetch_jobs(state: AgentState) -> dict:
                 # LangChain-generated function schema can intermittently fail
                 # with ``tool_use_failed`` before the model reaches our search
                 # adapter. Keep the workaround at the provider boundary.
-                reasoning_effort = "low" if "openai/gpt-oss" in model_name else "none"
                 request_model = with_structured_output(
                     get_chat_model(
                         model_name,
                         temperature=0.0,
-                        reasoning_effort=reasoning_effort,
+                        **reasoning_kwargs(model_name),
                         timeout=60,
                         max_retries=1,
                     ),
