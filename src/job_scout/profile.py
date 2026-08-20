@@ -9,6 +9,7 @@ finding jobs — and lets a caller (like the UI) extract once and reuse it.
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import date
 
@@ -93,10 +94,19 @@ def extract_profile(
     settings = get_settings()
     model_name = model or settings.scout_model
     prompt = EXTRACT_PROFILE_PROMPT.format(cv_text=cv_text)
-    tracer = get_tracer(thread_id, tags or ["extract"]) if thread_id else None
+    # Profile extraction is a one-time convenience step. Keep Opik import and
+    # setup off the critical path unless explicitly requested; a slow optional
+    # observability SDK must not make a local resume upload appear frozen.
+    trace_profile = os.getenv("JOBVIS_TRACE_PROFILE", "false").lower() in {"1", "true", "yes", "on"}
+    tracer = get_tracer(thread_id, tags or ["extract"]) if thread_id and trace_profile else None
     config = {"callbacks": [tracer]} if tracer else {}
     try:
-        profile = _extract_with_model_chain(prompt, config, model_chain(model_name, settings.scout_fallback_models))
+        profile = _extract_with_model_chain(
+            prompt,
+            config,
+            model_chain(model_name, settings.scout_fallback_models),
+            timeout=settings.scout_profile_timeout,
+        )
     except Exception:
         # Uploading a readable CV must not depend on one provider's availability.
         # The fallback is deliberately conservative and source-only: it extracts
@@ -174,12 +184,14 @@ def _parse_profile_json(message: object) -> Profile:
     return Profile.model_validate(json.loads(text))
 
 
-def _extract_with_model_chain(prompt: str, config: dict, models: tuple[str, ...]) -> Profile:
+def _extract_with_model_chain(prompt: str, config: dict, models: tuple[str, ...], *, timeout: float = 20.0) -> Profile:
     """Use typed extraction with bounded plain-JSON recovery per model."""
     last_error: Exception | None = None
     for model_name in models:
         try:
-            typed = with_structured_output(get_chat_model(model_name, temperature=0.0, max_retries=0), Profile, model_name)
+            typed = with_structured_output(
+                get_chat_model(model_name, temperature=0.0, timeout=timeout, max_retries=0), Profile, model_name
+            )
             result = typed.invoke(prompt, config=config)
             if isinstance(result, Profile):
                 return result
@@ -187,7 +199,7 @@ def _extract_with_model_chain(prompt: str, config: dict, models: tuple[str, ...]
         except Exception as exc:  # noqa: BLE001 - try the explicit next model
             last_error = exc
             try:
-                recovery = get_chat_model(model_name, temperature=0.0, max_retries=0)
+                recovery = get_chat_model(model_name, temperature=0.0, timeout=timeout, max_retries=0)
                 return _parse_profile_json(
                     recovery.invoke(
                         f"{prompt}\n\nReturn one valid JSON object only. Do not use Markdown fences or commentary.",
