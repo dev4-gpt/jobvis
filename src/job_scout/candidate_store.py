@@ -19,6 +19,8 @@ load with ``preferences=None``; callers fall back to the profile's own hints.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
@@ -29,6 +31,7 @@ from job_scout.profile import refresh_source_facts
 _STORE_DIR = Path(__file__).resolve().parents[2] / "data" / "candidate"
 _STORE_PATH = _STORE_DIR / "profile.json"
 _US_SCOPE_LOCATION = "Anywhere in the United States"
+_READ_TIMEOUT_SECONDS = float(os.getenv("JOBVIS_CANDIDATE_READ_TIMEOUT", "2"))
 
 
 class StoredCandidate(NamedTuple):
@@ -64,12 +67,25 @@ def save_candidate(profile: Profile, cv_text: str, preferences: dict | None = No
 def load_candidate() -> StoredCandidate | None:
     """The stored candidate, or None (never raises)."""
     try:
-        payload = json.loads(_STORE_PATH.read_text(encoding="utf-8"))
+        # A synced or externally locked personal-data file can block a regular
+        # read indefinitely on macOS. Candidate restore is optional; it must
+        # never prevent the API or wizard from starting. A child process gives
+        # us a killable timeout, unlike a worker thread stuck in ``read_text``.
+        result = subprocess.run(
+            ["/bin/cat", str(_STORE_PATH)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_READ_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            return None
+        payload = json.loads(result.stdout)
         cv_text = str(payload["cv_text"])
         profile = refresh_source_facts(Profile.model_validate(payload["profile"]), cv_text)
         links = [CVLink.model_validate(item) for item in payload.get("cv_links", [])]
         return StoredCandidate(profile, cv_text, payload.get("preferences"), links)
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
         return None
 
 

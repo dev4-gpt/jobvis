@@ -25,15 +25,13 @@ from html import escape, unescape
 from pathlib import Path
 from uuid import uuid4
 
-import gradio as gr
-
 from job_scout import candidate_store
 from job_scout.graph.schemas import CandidatePreferences, CVLink, Profile, RankedJob
 from job_scout.profile import extract_profile
 from job_scout.renderer import render_cover_letter_pdf, render_pdf
 from job_scout.runner import RunResult, TailorResult, stream_search, stream_tailor
 from job_scout.tools.cv_reader import CVReadError
-from job_scout.tracing import opik_url, register_prompts
+from job_scout.tracing import opik_url
 from job_scout.voice import bridge as voice_bridge
 from job_scout.voice import is_voice_available
 
@@ -49,22 +47,46 @@ ranked by fit, with the gaps shown honestly.</p>
 </ol>
 """
 
-THEME = gr.themes.Soft(
-    primary_hue=gr.themes.colors.emerald,
-    secondary_hue=gr.themes.colors.stone,
-    neutral_hue=gr.themes.colors.stone,
-    font=(gr.themes.GoogleFont("Public Sans"), "ui-sans-serif", "system-ui", "sans-serif"),
-    radius_size=gr.themes.sizes.radius_md,
-).set(
-    body_background_fill="#FBFAF8",
-    body_background_fill_dark="#141311",
-    block_background_fill="#FFFFFF",
-    block_background_fill_dark="#1E1D1A",
-    button_primary_background_fill="#0E6E4A",
-    button_primary_background_fill_hover="#0A5539",
-    button_primary_text_color="#FFFFFF",
-    button_large_radius="12px",
-)
+_GRADIO = None
+THEME = None
+
+
+class _GradioProxy:
+    """Resolve Gradio on first component/update access, not module import."""
+
+    def __getattr__(self, name: str):
+        _load_gradio()
+        return getattr(_GRADIO, name)
+
+
+gr = _GradioProxy()
+
+
+def _load_gradio() -> None:
+    """Load the heavy wizard dependency only after the API is listening."""
+    global _GRADIO, THEME
+    if _GRADIO is not None:
+        return
+    import gradio as gradio_module
+
+    _GRADIO = gradio_module
+    THEME = gr.themes.Soft(
+        primary_hue=gr.themes.colors.emerald,
+        secondary_hue=gr.themes.colors.stone,
+        neutral_hue=gr.themes.colors.stone,
+        font=(gr.themes.GoogleFont("Public Sans"), "ui-sans-serif", "system-ui", "sans-serif"),
+        radius_size=gr.themes.sizes.radius_md,
+    ).set(
+        body_background_fill="#FBFAF8",
+        body_background_fill_dark="#141311",
+        block_background_fill="#FFFFFF",
+        block_background_fill_dark="#1E1D1A",
+        button_primary_background_fill="#0E6E4A",
+        button_primary_background_fill_hover="#0A5539",
+        button_primary_text_color="#FFFFFF",
+        button_large_radius="12px",
+    )
+
 
 # Fine tiled grain, kept as a constant so the CSS block stays within line length.
 _GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")"  # noqa: E501
@@ -1165,7 +1187,7 @@ def reset():
 
 def build_app() -> gr.Blocks:
     """Build the four-step wizard app."""
-    register_prompts()
+    _load_gradio()
     from job_scout.api import CONSOLE_PORT
 
     with gr.Blocks(title="Job Scout") as demo:
