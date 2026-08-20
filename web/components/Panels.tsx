@@ -44,9 +44,9 @@ export function nextStep(state: State, mode: OrbMode): Step {
       cue: "give me the highlights",
     };
   }
-  if (state.jobs.length > 0) {
+  if ((state.source_coverage?.ranked ?? state.jobs.length) > 0) {
     return {
-      now: `${state.jobs.length} matches ranked`,
+      now: `${state.source_coverage?.ranked ?? state.jobs.length} matches ranked`,
       next: "Ask to run through them, or to tailor one.",
       cue: "tailor an application for the first one",
     };
@@ -66,32 +66,57 @@ export function NextPanel({ step }: { step: Step }) {
 }
 
 export function JobsPanel({ state, onOpenApplication }: { state: State; onOpenApplication: (jobId: string) => void }) {
-  if (state.jobs.length === 0) return null;
+  const primary = state.primary_jobs ?? state.jobs.filter((job) => job.primary_or_adjacent === "primary");
+  const adjacent = state.adjacent_jobs ?? state.jobs.filter((job) => job.primary_or_adjacent === "adjacent");
+  const blocked =
+    state.blocked_or_review_jobs ??
+    state.jobs.filter((job) => job.eligibility_status === "blocked" || job.primary_or_adjacent === "review");
+  if (primary.length === 0 && adjacent.length === 0 && blocked.length === 0) return null;
+
+  const renderJob = (job: (typeof state.jobs)[number], index: number, allowOpen: boolean) => (
+    <div className="row" key={`${job.job_id}-${index}`} style={{ animationDelay: `${index * 70}ms` }}>
+      <span className="rank">{String(job.rank).padStart(2, "0")}</span>
+      <span className="job">
+        <b>{job.title}</b>
+        <span className="meta">
+          {job.company} · {job.location}
+        </span>
+        <span className="meta">
+          {job.primary_or_adjacent ?? "review"} · {job.eligibility_status ?? "unknown"}
+          {job.work_mode ? ` · ${job.work_mode}` : ""}
+          {job.start_timing_fit ? ` · start ${job.start_timing_fit}` : ""}
+        </span>
+        {(job.hard_blockers?.length || job.eligibility_reasons?.length) ? (
+          <span className="meta warning">{(job.hard_blockers ?? job.eligibility_reasons ?? []).slice(0, 2).join(" · ")}</span>
+        ) : null}
+      </span>
+      <span className="score">{job.fit_score}</span>
+      {allowOpen && job.url && (
+        <button type="button" className="mini-action" onClick={() => onOpenApplication(job.job_id)}>
+          Open application
+        </button>
+      )}
+    </div>
+  );
+
+  const lane = (label: string, jobs: typeof primary, allowOpen: boolean) =>
+    jobs.length > 0 ? (
+      <div className="job-lane" key={label}>
+        <p className="label">{label} · {jobs.length}</p>
+        {jobs.map((job, index) => renderJob(job, index, allowOpen))}
+      </div>
+    ) : null;
+
   return (
     <section className="block">
-      <p className="label">Top matches</p>
-      {state.jobs.slice(0, 3).map((job, i) => (
-        <div className="row" key={job.job_id} style={{ animationDelay: `${i * 70}ms` }}>
-          <span className="rank">{String(job.rank).padStart(2, "0")}</span>
-          <span className="job">
-            <b>{job.title}</b>
-            <span className="meta">
-              {job.company} · {job.location}
-            </span>
-            <span className="meta">
-              {job.primary_or_adjacent ?? "review"} · {job.eligibility_status ?? "unknown"}
-              {job.work_mode ? ` · ${job.work_mode}` : ""}
-              {job.start_timing_fit ? ` · start ${job.start_timing_fit}` : ""}
-            </span>
-          </span>
-          <span className="score">{job.fit_score}</span>
-          {job.url && (
-            <button type="button" className="mini-action" onClick={() => onOpenApplication(job.job_id)}>
-              Open application
-            </button>
-          )}
+      {lane("Primary matches", primary, true)}
+      {lane("Adjacent roles", adjacent, true)}
+      {lane("Blocked or review-required", blocked, false)}
+      {state.source_coverage?.diagnostics && state.source_coverage.diagnostics.length > 0 && (
+        <div className="meta source-diagnostics">
+          Sources: {state.source_coverage.diagnostics.map((item) => `${item.source} ${item.returned}${item.error ? " (error)" : ""}`).join(" · ")}
         </div>
-      ))}
+      )}
     </section>
   );
 }

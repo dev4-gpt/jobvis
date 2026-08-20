@@ -61,3 +61,11 @@ def test_runtime_source_check_reports_identity() -> None:
     assert "branch=" in result.stdout
     assert "commit=" in result.stdout
     assert str(ROOT) in result.stdout
+
+
+def test_runtime_source_check_rejects_non_primary_worktree(tmp_path, monkeypatch) -> None:
+    """A stale/fixed worktree must fail before the app import path is used."""
+    import scripts.runtime_source_check as source_check
+
+    monkeypatch.setattr(source_check, "_primary_worktree", lambda root: tmp_path)
+    assert source_check.check(ROOT) == 1

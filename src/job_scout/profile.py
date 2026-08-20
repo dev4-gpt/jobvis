@@ -179,7 +179,7 @@ def _extract_with_model_chain(prompt: str, config: dict, models: tuple[str, ...]
     last_error: Exception | None = None
     for model_name in models:
         try:
-            typed = with_structured_output(get_chat_model(model_name, temperature=0.0), Profile, model_name)
+            typed = with_structured_output(get_chat_model(model_name, temperature=0.0, max_retries=0), Profile, model_name)
             result = typed.invoke(prompt, config=config)
             if isinstance(result, Profile):
                 return result
@@ -187,7 +187,7 @@ def _extract_with_model_chain(prompt: str, config: dict, models: tuple[str, ...]
         except Exception as exc:  # noqa: BLE001 - try the explicit next model
             last_error = exc
             try:
-                recovery = get_chat_model(model_name, temperature=0.0)
+                recovery = get_chat_model(model_name, temperature=0.0, max_retries=0)
                 return _parse_profile_json(
                     recovery.invoke(
                         f"{prompt}\n\nReturn one valid JSON object only. Do not use Markdown fences or commentary.",

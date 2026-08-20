@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,8 +24,31 @@ def _identity(root: Path) -> tuple[str, str]:
         return "unknown", "unknown"
 
 
-def main() -> int:
-    root = Path(__file__).resolve().parents[1]
+def _primary_worktree(root: Path) -> Path | None:
+    """Return the primary checkout recorded by Git, when this is a worktree."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            try:
+                return Path(line.removeprefix("worktree ")).resolve()
+            except OSError:
+                return None
+    return None
+
+
+def check(root: Path) -> int:
+    """Validate one checkout before any application imports are attempted."""
+    root = root.resolve()
     graph_init = root / "src" / "job_scout" / "graph" / "__init__.py"
     try:
         text = graph_init.read_text(encoding="utf-8")
@@ -43,9 +67,23 @@ def main() -> int:
         )
         return 1
 
+    primary = _primary_worktree(root)
+    if primary is not None and primary != root.resolve():
+        print(
+            "Jobvis source is not the canonical checkout: "
+            f"running from {root}, but Git records {primary} as the primary worktree. "
+            "Run `make app` from the primary checkout so the wizard and voice console share the intended code.",
+            file=sys.stderr,
+        )
+        return 1
+
     branch, commit = _identity(root)
     print(f"Jobvis source check: OK ({root}; branch={branch}; commit={commit})")
     return 0
+
+
+def main() -> int:
+    return check(Path(__file__).resolve().parents[1])
 
 
 if __name__ == "__main__":

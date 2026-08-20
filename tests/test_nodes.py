@@ -398,6 +398,7 @@ def test_reformulate_increments_counter(monkeypatch, sample_profile):
     assert out["search_query"] == "data analyst"
     assert out["reformulation_count"] == 1
     assert out["llm_calls"] == 4
+    assert out["llm_calls"] == 4
 
 
 def test_rank_jobs_skips_already_scored(monkeypatch, sample_profile):

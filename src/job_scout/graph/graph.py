@@ -110,6 +110,14 @@ def should_reformulate(state: AgentState) -> str:
     if any("deterministic review scores" in error or "ranking timed out" in error for error in state.get("errors", [])):
         return END
 
+    # The candidate-aware UI already fans out over the user's selected role
+    # families with deterministic title queries. Running the legacy LLM
+    # reformulation loop after that fan-out only repeats source calls and can
+    # turn a thin market into another provider failure. Legacy callers without
+    # a policy object retain the original bounded loop below.
+    if state.get("candidate_preferences") is not None:
+        return END
+
     cap = min(MAX_REFORMULATIONS, get_settings().scout_max_reformulations)
     ranked = state.get("ranked_jobs", [])
     good = sum(1 for r in ranked if r.fit_score >= GOOD_FIT_THRESHOLD)

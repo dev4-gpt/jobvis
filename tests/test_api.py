@@ -239,6 +239,48 @@ def test_state_carries_candidate_jobs_and_pack(client, bridge, monkeypatch, samp
     assert "2 statements could not be verified" in body["pack"]["verdict"]
 
 
+def test_state_exposes_primary_adjacent_and_review_lanes(client, bridge, monkeypatch, sample_profile):
+    bridge.register_thread("t1")
+    primary = RankedJob(
+        job=make_job("primary", "AI Engineer", "Acme"),
+        fit_score=90,
+        final_priority_score=90,
+        role_fit_score=92,
+        evidence_fit_score=88,
+        eligibility_status="eligible",
+        primary_or_adjacent="primary",
+        fit_explanation="primary fit",
+    )
+    adjacent = RankedJob(
+        job=make_job("adjacent", "Java Engineer", "Acme"),
+        fit_score=60,
+        final_priority_score=60,
+        eligibility_status="borderline",
+        primary_or_adjacent="adjacent",
+        fit_explanation="adjacent fit",
+    )
+    blocked = RankedJob(
+        job=make_job("blocked", "AI Intern", "Acme"),
+        fit_score=0,
+        final_priority_score=0,
+        eligibility_status="blocked",
+        primary_or_adjacent="primary",
+        hard_blockers=["internship excluded"],
+        fit_explanation="blocked",
+    )
+    monkeypatch.setattr(
+        bridge_module,
+        "checkpoint_values",
+        lambda thread_id: {"ranked_jobs": [primary, adjacent, blocked], "jobs": [primary.job, adjacent.job, blocked.job]},
+    )
+
+    body = client.get("/api/state").json()
+
+    assert [job["job_id"] for job in body["primary_jobs"]] == ["primary"]
+    assert [job["job_id"] for job in body["adjacent_jobs"]] == ["adjacent"]
+    assert [job["job_id"] for job in body["blocked_or_review_jobs"]] == ["blocked"]
+
+
 def test_state_claims_a_thread_and_seeds_the_stored_candidate(client, bridge, sample_profile):
     """A cold console visit restores the saved candidate, like the wizard does."""
     import job_scout.candidate_store as candidate_store

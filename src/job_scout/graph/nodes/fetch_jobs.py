@@ -227,7 +227,7 @@ def fetch_jobs(state: AgentState) -> dict:
                         temperature=0.0,
                         **reasoning_kwargs(model_name),
                         timeout=60,
-                        max_retries=1,
+                        max_retries=0,
                     ),
                     SearchRequest,
                     model_name,
@@ -238,7 +238,7 @@ def fetch_jobs(state: AgentState) -> dict:
                 query, dropped = _trim_query(request.query)
                 model_country = request.country or None
             else:
-                model = get_chat_model(model_name, temperature=0.0, timeout=60, max_retries=1).bind_tools([search_jobs])
+                model = get_chat_model(model_name, temperature=0.0, timeout=60, max_retries=0).bind_tools([search_jobs])
                 message = model.invoke([SystemMessage(_SYSTEM), HumanMessage(_build_prompt(state))])
                 if message.tool_calls:
                     args = message.tool_calls[0]["args"]

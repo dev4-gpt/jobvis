@@ -85,6 +85,9 @@ export type State = {
   candidate: Candidate | null;
   candidate_preferences?: Record<string, unknown> | null;
   jobs: Job[];
+  primary_jobs?: Job[];
+  adjacent_jobs?: Job[];
+  blocked_or_review_jobs?: Job[];
   source_coverage?: {
     fetched: number;
     ranked: number;
@@ -92,6 +95,16 @@ export type State = {
     adjacent: number;
     blocked_or_review: number;
     sources: string[];
+    diagnostics?: {
+      source: string;
+      requested: boolean;
+      completed: boolean;
+      timed_out: boolean;
+      latency_ms: number;
+      returned: number;
+      contributed: boolean;
+      error?: string | null;
+    }[];
   };
   pack: Pack | null;
   run: RunStatus;

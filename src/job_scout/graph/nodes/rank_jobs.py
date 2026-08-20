@@ -149,7 +149,7 @@ def rank_jobs(state: AgentState) -> dict:
     ensure_budget(calls, n_batches * len(models), settings.max_llm_calls_per_run)
 
     def structured_model(model_name: str):
-        model_kwargs = {"timeout": settings.scout_rank_timeout, "max_retries": 1}
+        model_kwargs = {"timeout": settings.scout_rank_timeout, "max_retries": 0}
         model_kwargs.update(reasoning_kwargs(model_name))
         return with_structured_output(get_chat_model(model_name, temperature=0.0, **model_kwargs), JobScores, model_name)
 

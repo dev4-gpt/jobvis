@@ -178,11 +178,27 @@ def current_state() -> dict:
     primary = [r for r in ranked if r.primary_or_adjacent == "primary" and r.eligibility_status != "blocked"]
     adjacent = [r for r in ranked if r.primary_or_adjacent == "adjacent" and r.eligibility_status != "blocked"]
     blocked = [r for r in ranked if r.eligibility_status == "blocked" or r.primary_or_adjacent == "review"]
+    ranked_rows = [_job_row(r, i) for i, r in enumerate(ranked, 1)]
     return {
         "step": snap.step,
         "thread_id": snap.thread_id,
         "candidate": _candidate_payload(snap.profile),
-        "jobs": [_job_row(r, i) for i, r in enumerate(ranked[:5], 1)],
+        # Keep `jobs` for older console clients, but expose explicit lanes so
+        # an adjacent or review-only role cannot look like a primary match.
+        "jobs": ranked_rows[:5],
+        "primary_jobs": [
+            row
+            for row in ranked_rows
+            if row.get("primary_or_adjacent") == "primary" and row.get("eligibility_status") != "blocked"
+        ],
+        "adjacent_jobs": [
+            row
+            for row in ranked_rows
+            if row.get("primary_or_adjacent") == "adjacent" and row.get("eligibility_status") != "blocked"
+        ],
+        "blocked_or_review_jobs": [
+            row for row in ranked_rows if row.get("eligibility_status") == "blocked" or row.get("primary_or_adjacent") == "review"
+        ],
         "candidate_preferences": _preference_payload(values.get("candidate_preferences")),
         "source_coverage": {
             "fetched": len(values.get("jobs") or []),
@@ -193,6 +209,7 @@ def current_state() -> dict:
             # ``jobs`` is the raw fetch output (``JobPosting`` objects); the
             # ranked output below is the separate ``RankedJob`` collection.
             "sources": sorted({job.source for job in values.get("jobs") or []}),
+            "diagnostics": [diagnostic.model_dump(mode="json") for diagnostic in values.get("source_diagnostics") or []],
         },
         "pack": _pack_payload(values),
         "run": bridge.run_status(),

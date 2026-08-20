@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from job_scout.graph.graph import END, get_compiled_graph, should_reformulate
-from job_scout.graph.schemas import JobPosting, RankedJob
+from job_scout.graph.schemas import CandidatePreferences, JobPosting, RankedJob
 from job_scout.llm import LLMBudgetExceededError, ensure_budget
 
 
@@ -34,6 +34,15 @@ def test_provider_fallback_does_not_trigger_another_model_call():
         "ranked_jobs": [_ranked(20)],
         "reformulation_count": 0,
         "errors": ["rank_jobs: ranking providers unavailable; used deterministic review scores"],
+    }
+    assert should_reformulate(state) == END
+
+
+def test_candidate_aware_fanout_does_not_enter_legacy_reformulation_loop():
+    state = {
+        "candidate_preferences": CandidatePreferences(),
+        "ranked_jobs": [_ranked(40)],
+        "reformulation_count": 0,
     }
     assert should_reformulate(state) == END
 

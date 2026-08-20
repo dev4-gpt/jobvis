@@ -1,8 +1,13 @@
 .DEFAULT_GOAL := help
 
+# Resolve every command relative to the checkout that owns this Makefile. This
+# matters when a user runs `make -f .../Makefile app` from the parent Projects
+# directory: `PYTHONPATH=src` must never accidentally point at the parent.
+REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+
 # Keep the src/ layout explicit so local commands do not depend on the
 # platform-specific behavior of uv/hatch editable installs.
-UV_RUN := PYTHONPATH=src uv run
+UV_RUN := cd "$(REPO_ROOT)" && PYTHONPATH=src uv run
 # Override with `make CONSOLE_PORT=8001 WIZARD_PORT=7861 app`, or export the
 # corresponding JOBVIS_* variables. This lets Jobvis coexist with unrelated
 # local services on either default port.
@@ -25,7 +30,7 @@ setup: ## Install deps and pre-commit hooks
 
 .PHONY: app
 app: preflight port-check ## Launch both surfaces: wizard on configured port and console on configured port
-	$(JOBVIS_WIZARD_ENV) $(JOBVIS_CONSOLE_ENV) $(UV_RUN) python -m job_scout.app
+	cd "$(REPO_ROOT)" && $(JOBVIS_WIZARD_ENV) $(JOBVIS_CONSOLE_ENV) PYTHONPATH=src uv run python -m job_scout.app
 
 .PHONY: preflight
 preflight: source-check ## Validate imports, graph compilation, and model-role configuration before launch
@@ -67,17 +72,17 @@ jobvis-api: ## API only, no wizard — for frontend work with `make web-dev` (em
 
 .PHONY: web-build
 web-build: ## Build the Jobvis console into web/out (static export served by `make jobvis`)
-	cd web && npm ci && npm run build
+	cd "$(REPO_ROOT)/web" && npm ci && npm run build
 
 .PHONY: web-dev
 web-dev: ## Next dev server on :3000 against the API on :8000 (run `make jobvis` too)
-	cd web && npm run dev
+	cd "$(REPO_ROOT)/web" && npm run dev
 
 .PHONY: web-assets
 web-assets: ## Vendor the MediaPipe hand-tracking assets (only needed for gesture control)
-	@mkdir -p web/public/mediapipe/wasm
-	cp web/node_modules/@mediapipe/tasks-vision/wasm/* web/public/mediapipe/wasm/
-	curl -fL -o web/public/mediapipe/hand_landmarker.task \
+	@mkdir -p "$(REPO_ROOT)/web/public/mediapipe/wasm"
+	cp "$(REPO_ROOT)"/web/node_modules/@mediapipe/tasks-vision/wasm/* "$(REPO_ROOT)/web/public/mediapipe/wasm/"
+	curl -fL -o "$(REPO_ROOT)/web/public/mediapipe/hand_landmarker.task" \
 		https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
 	@echo "gestures ready — set NEXT_PUBLIC_JOBVIS_GESTURES=1 in web/.env.local and rebuild"
 

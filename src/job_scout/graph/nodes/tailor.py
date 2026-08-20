@@ -164,7 +164,7 @@ def _invoke_tailoring_pack(
         "Do not use Markdown fences or any text outside the JSON object."
     )
     try:
-        recovery_model = get_chat_model(tailor_model, temperature=0.3)
+        recovery_model = get_chat_model(tailor_model, temperature=0.3, max_retries=0)
         return _parse_json_pack(recovery_model.invoke(recovery_prompt)), 2
     except Exception as exc:
         raise TailoringInvocationError(
@@ -650,7 +650,10 @@ def tailor(state: AgentState) -> dict:
     for model_name in model_names:
         try:
             ensure_budget(total_calls, 1, settings.max_llm_calls_per_run)
-            model = cast(Any, with_structured_output(get_chat_model(model_name, temperature=0.3), TailoringPack, model_name))
+            model = cast(
+                Any,
+                with_structured_output(get_chat_model(model_name, temperature=0.3, max_retries=0), TailoringPack, model_name),
+            )
             pack, calls_used = _invoke_tailoring_pack(
                 model,
                 prompt,
