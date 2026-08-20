@@ -652,7 +652,16 @@ def tailor(state: AgentState) -> dict:
             ensure_budget(total_calls, 1, settings.max_llm_calls_per_run)
             model = cast(
                 Any,
-                with_structured_output(get_chat_model(model_name, temperature=0.3, max_retries=0), TailoringPack, model_name),
+                with_structured_output(
+                    get_chat_model(
+                        model_name,
+                        temperature=0.3,
+                        timeout=settings.scout_tailor_timeout,
+                        max_retries=0,
+                    ),
+                    TailoringPack,
+                    model_name,
+                ),
             )
             pack, calls_used = _invoke_tailoring_pack(
                 model,
