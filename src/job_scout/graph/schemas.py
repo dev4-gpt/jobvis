@@ -297,7 +297,12 @@ class TailoringPack(BaseModel):
                     normalized_links.append({"label": item, "url": "", "page": 1, "source": "llm_label"})
                 elif isinstance(item, dict):
                     link = dict(item)
-                    link.setdefault("page", 1)
+                    # Some models use semantic labels ("github", "portfolio")
+                    # in the page slot. The source PDF annotations are
+                    # authoritative and are reattached by the tailor node;
+                    # keep this draft parseable with a safe placeholder.
+                    if not isinstance(link.get("page"), int):
+                        link["page"] = 1
                     normalized_links.append(link)
             cv["links"] = normalized_links
 

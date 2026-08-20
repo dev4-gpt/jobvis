@@ -178,3 +178,18 @@ def test_legacy_tailoring_json_is_normalized_before_validation():
     assert pack.cv.projects[0].company == "Project"
     assert pack.cv.education == ["Penn State — M.S. AI (2026-12)"]
     assert pack.cv.links[0].page == 1
+
+
+def test_semantic_link_page_labels_are_safe_placeholders():
+    pack = TailoringPack.model_validate(
+        {
+            "cv": {
+                "headline": "AI engineer",
+                "summary": "Builds ML systems.",
+                "links": [{"label": "GitHub", "url": "https://github.com/example", "page": "github"}],
+            },
+            "cover_letter": "Draft.",
+        }
+    )
+
+    assert pack.cv.links[0].page == 1
