@@ -33,12 +33,16 @@ app: preflight port-check ## Launch both surfaces: wizard on configured port and
 	cd "$(REPO_ROOT)" && $(JOBVIS_WIZARD_ENV) $(JOBVIS_CONSOLE_ENV) PYTHONPATH=src uv run python -m job_scout.app
 
 .PHONY: preflight
-preflight: source-check ## Validate imports, graph compilation, and model-role configuration before launch
+preflight: source-check web-check ## Validate source, console build, imports, and model configuration before launch
 	$(UV_RUN) python -m job_scout.health
 
 .PHONY: source-check
 source-check: ## Verify this checkout contains the current import-safe runtime
 	$(UV_RUN) python scripts/runtime_source_check.py
+
+.PHONY: web-check
+web-check: ## Fail clearly when the static voice-console build is missing
+	@test -f "$(REPO_ROOT)/web/out/index.html" || (echo "Jobvis console is not built at $(REPO_ROOT)/web/out. Run 'make web-build' once, then run 'make app' again."; exit 1)
 
 .PHONY: port-check
 port-check: ## Fail clearly if either configured Jobvis port is already occupied

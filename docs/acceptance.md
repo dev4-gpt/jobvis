@@ -1,5 +1,28 @@
 # Acceptance record
 
+## Current local acceptance (2026-08-20)
+
+The canonical checkout is `/Users/aryamandev/Documents/Codex/Projects/Jobvis/observable-job-agent`,
+on branch `main`. The runtime preflight now rejects a non-primary
+Git worktree before importing the application and prints the source path,
+branch, and commit.
+
+- `329 passed` in the offline Python suite; Ruff and `git diff --check` passed.
+- The built voice console passed TypeScript typecheck, ESLint, and Next static build.
+- A live same-process smoke on wizard `:7864` and console `:8005` returned HTTP 200
+  for the wizard, `/api/config`, and `/api/state`.
+- The uploaded local resume fact check found 12 PDF links, phone contact, and the
+  Penn State M.S. Artificial Intelligence end date of December 2026.
+- Candidate-aware searches use deterministic role-family fan-out and do not enter
+  the legacy LLM reformulation loop; provider retries are disabled at the client
+  boundary and explicit fallbacks remain bounded.
+- The console now separates primary, adjacent, and blocked/review-required roles,
+  including source diagnostics.
+
+The last actual-resume pack backtest should be rerun once the local PDF/parser
+process is responsive; the offline backtest and link-preservation acceptance
+fixtures are green. No remote push or deployment was performed.
+
 Verified on 2026-08-13 from branch `codex/harden-job-agent`.
 
 ## Passing checks
