@@ -19,9 +19,12 @@ branch, and commit.
 - The console now separates primary, adjacent, and blocked/review-required roles,
   including source diagnostics.
 
-The last actual-resume pack backtest should be rerun once the local PDF/parser
-process is responsive; the offline backtest and link-preservation acceptance
-fixtures are green. No remote push or deployment was performed.
+The deterministic source-pack backtest was also rerun against
+`/Users/aryamandev/Downloads/Aryaman_resume.pdf`: 12/12 source links survived,
+the grounded cover letter passed at 271 words with 3 evidence matches and 2
+requirement matches, and the CV density contract passed (653 words, 25 bullets,
+3 experience entries, 4 projects, 35 skills). No remote push or deployment was
+performed.
 
 Verified on 2026-08-13 from branch `codex/harden-job-agent`.
 
