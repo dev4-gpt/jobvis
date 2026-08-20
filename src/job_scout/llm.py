@@ -81,6 +81,14 @@ def with_structured_output(model: BaseChatModel, schema: type, provider_model: s
     """
     if provider_model.startswith("groq:"):
         return model.with_structured_output(schema, method="json_schema")
+    # OpenRouter fronts models with different levels of support for OpenAI's
+    # ``parsed`` Structured Outputs envelope.  Some otherwise capable models
+    # return an empty message with ``parsed=None`` when that envelope is used.
+    # JSON-object mode is supported by a much wider set of OpenRouter models;
+    # the prompts still require the exact Pydantic shape and callers validate
+    # the result at the boundary.
+    if provider_model.startswith("openai:") and "openrouter.ai" in get_settings().openai_base_url.lower():
+        return model.with_structured_output(schema, method="json_mode")
     return model.with_structured_output(schema)
 
 

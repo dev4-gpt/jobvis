@@ -30,4 +30,7 @@ Candidate profile:
 
 Jobs to score:
 {jobs}
+
+Return exactly one JSON object matching the requested output schema. Do not use
+Markdown fences, chain-of-thought, or commentary outside the JSON object.
 """

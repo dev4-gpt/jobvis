@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import MagicMock
 
 from job_scout.config import get_settings
-from job_scout.llm import _export_provider_env
+from job_scout.llm import _export_provider_env, with_structured_output
 
 
 def test_openrouter_settings_export_to_openai_compatible_client(monkeypatch):
@@ -19,6 +20,16 @@ def test_openrouter_settings_export_to_openai_compatible_client(monkeypatch):
 
     assert os.environ["OPENAI_API_KEY"] == "test-openrouter-key"
     assert os.environ["OPENAI_BASE_URL"] == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_uses_json_mode_for_structured_output(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+    get_settings.cache_clear()
+    model = MagicMock()
+
+    with_structured_output(model, dict, "openai:example/model")
+
+    model.with_structured_output.assert_called_once_with(dict, method="json_mode")
 
 
 def test_groq_settings_export(monkeypatch):

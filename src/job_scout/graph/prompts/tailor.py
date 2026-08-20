@@ -50,6 +50,11 @@ Resume persona:
 
 Company research (may be empty):
 {research}
+
+Return exactly one JSON object matching the TailoringPack schema, with nested
+cv, experience, projects, skills, education, and links fields as requested.
+Do not use Markdown fences, chain-of-thought, or commentary outside the JSON
+object.
 """
 
 # Appended to the rules only when research notes are present.

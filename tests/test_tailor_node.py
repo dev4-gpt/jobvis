@@ -8,7 +8,7 @@ import job_scout.graph.nodes.tailor as tailor_mod
 from job_scout.graph.nodes.tailor import tailor
 from job_scout.graph.schemas import CVContent, ExperienceEntry, RankedJob, TailoredBullet, TailoringPack
 from job_scout.llm import LLMBudgetExceededError
-from tests.conftest import make_job, structured_llm
+from tests.conftest import make_job, plain_llm, structured_llm
 from tests.test_corpus import SAMPLE_CV
 
 
@@ -124,3 +124,30 @@ def test_bullet_requiring_corpus_ref_flows_through(monkeypatch, sample_profile):
     update = tailor(_state(profile=sample_profile))
     bullets = update["tailoring"].cv.experience[0].bullets
     assert bullets[0].corpus_ref == "cv-bullet-002"
+
+
+def test_empty_openrouter_structured_envelope_recovers_with_validated_json(monkeypatch, sample_profile):
+    pack = _pack().model_copy(
+        update={
+            "cover_letter": (
+                "Dear Initech team, "
+                + "I built practical Python and SQL systems and measured their outcomes. " * 45
+                + "Sincerely, Aryaman"
+            )
+        }
+    )
+    base_model = structured_llm(pack)
+    typed_model = base_model.with_structured_output.return_value
+    typed_model.invoke.side_effect = [
+        ValueError("Structured Output response does not have a 'parsed' field nor a 'refusal' field"),
+        pack,
+    ]
+    recovery_model = plain_llm(pack.model_dump_json())
+    models = iter([base_model, recovery_model])
+    monkeypatch.setattr(tailor_mod, "get_chat_model", lambda *a, **k: next(models))
+
+    update = tailor(_state(profile=sample_profile))
+
+    assert isinstance(update["tailoring"], TailoringPack)
+    assert update["llm_calls"] == 6  # typed attempt + recovery + bounded quality repair
+    assert not any("no draft was created" in error for error in update["errors"])

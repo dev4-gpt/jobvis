@@ -39,6 +39,9 @@ Fill in every field:
 
 CV text:
 {cv_text}
+
+Return exactly one JSON object matching the requested fields. Do not use
+Markdown fences, commentary, or an explanation outside the JSON object.
 """
 
 
