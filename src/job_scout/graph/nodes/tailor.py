@@ -198,6 +198,10 @@ def _render_job(ranked: RankedJob) -> str:
         f"company: {job.company}\n"
         f"location: {job.location} (remote: {job.remote})\n"
         f"fit_score: {ranked.fit_score} — {ranked.fit_explanation}\n"
+        f"deterministic eligibility: {ranked.eligibility_status}\n"
+        f"deterministic role bucket: {ranked.primary_or_adjacent}\n"
+        f"deterministic hard blockers: {', '.join(ranked.hard_blockers) or 'none'}\n"
+        f"deterministic review reasons: {', '.join(ranked.eligibility_reasons) or 'none'}\n"
         f"description: {job.description[:_DESCRIPTION_LIMIT]}"
     )
 
@@ -587,6 +591,17 @@ def tailor(state: AgentState) -> dict:
     if ranked is None:
         errors.append(f"tailor: selected job id {job_id!r} is not among the {len(ranked_jobs)} ranked jobs on this thread")
         return {"tailoring": None, "errors": errors}
+
+    # A blocked posting is already a deterministic policy decision. Do not
+    # spend provider calls creating an application for a role the candidate's
+    # own search policy has excluded (internship, non-full-time, clearance,
+    # start-window mismatch, or rejected work mode). Adjacent/review roles are
+    # still tailorable when the user explicitly chooses them, but the prompt
+    # receives their bucket and reasons so it cannot present them as primary.
+    if ranked.eligibility_status == "blocked":
+        blockers = "; ".join(ranked.hard_blockers or ranked.eligibility_reasons) or "policy constraint"
+        errors.append(f"tailor: selected job is blocked by the candidate policy ({blockers}); no application was generated")
+        return {"tailoring": None, "errors": errors, "cover_letter_quality": None}
 
     preferences = preferences_from_dict(state.get("candidate_preferences"))
 

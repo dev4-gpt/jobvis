@@ -171,6 +171,15 @@ def start_tailoring(parameters: dict | None = None) -> dict:
             return {"started": False, "candidates": candidates, "note": "Several jobs match — ask which one they meant."}
         return {"started": False, "note": "No job matched that reference — use the rank number from get_top_jobs."}
     r = ranked[index]
+    if r.eligibility_status == "blocked":
+        blockers = "; ".join(r.hard_blockers or r.eligibility_reasons) or "candidate policy constraint"
+        return {
+            "started": False,
+            "rank": index + 1,
+            "title": r.job.title,
+            "company": r.job.company,
+            "note": f"I will not tailor this blocked role: {blockers}. Choose an eligible or adjacent role instead.",
+        }
     refusal = bridge.start_tailoring(r.job.job_id)
     if refusal:
         return {"started": False, "note": refusal}

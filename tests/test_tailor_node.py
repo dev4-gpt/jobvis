@@ -85,6 +85,24 @@ def test_unknown_job_id_errors_without_llm_call(monkeypatch, sample_profile):
     llm.with_structured_output().invoke.assert_not_called()
 
 
+def test_blocked_job_is_rejected_before_corpus_or_llm_work(monkeypatch, sample_profile):
+    llm = structured_llm(_pack())
+    monkeypatch.setattr(tailor_mod, "get_chat_model", lambda *a, **k: llm)
+    blocked = _ranked().model_copy(
+        update={
+            "eligibility_status": "blocked",
+            "hard_blockers": ["internship or co-op is excluded from the primary search"],
+            "primary_or_adjacent": "primary",
+        }
+    )
+
+    update = tailor(_state(profile=sample_profile, ranked_jobs=[blocked]))
+
+    assert update["tailoring"] is None
+    assert any("selected job is blocked" in error for error in update["errors"])
+    llm.with_structured_output().invoke.assert_not_called()
+
+
 def test_virgin_thread_errors_without_llm_call(monkeypatch):
     llm = structured_llm(_pack())
     monkeypatch.setattr(tailor_mod, "get_chat_model", lambda *a, **k: llm)
