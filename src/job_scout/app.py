@@ -1514,6 +1514,10 @@ def main() -> None:
 def _assert_port_available(port: int, surface: str) -> None:
     """Fail before starting either server when a local port is occupied."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        # A recently stopped local server can leave the port in TIME_WAIT.
+        # Match the reuse behavior of the servers we are about to start so the
+        # preflight does not reject an otherwise free Jobvis port.
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
         except OSError as exc:
