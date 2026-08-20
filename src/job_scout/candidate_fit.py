@@ -86,7 +86,16 @@ ADJACENT_TERMS = (
     "business intelligence",
     "bi analyst",
     "java developer",
+    "java",
+    "ruby on rails",
+    "rails",
+    "ruby",
+    "full-stack",
+    "full stack",
     "software engineer",
+    "frontend engineer",
+    "backend engineer",
+    "tech lead",
     "financial analyst",
     "automation analyst",
 )
@@ -208,6 +217,7 @@ def normalize_job(job: JobPosting) -> JobPosting:
 def role_bucket(job: JobPosting, preferences: CandidatePreferences) -> str:
     """Classify a title into primary, adjacent, or review without an LLM."""
     haystack = f"{job.title} {job.description[:900]}".lower()
+    title = job.title.lower()
     primary_terms: list[str] = []
     for family in preferences.primary_role_families:
         terms = PRIMARY_FAMILY_TERMS.get(family, ())
@@ -221,6 +231,28 @@ def role_bucket(job: JobPosting, preferences: CandidatePreferences) -> str:
                 primary_terms.extend(terms)
         else:
             primary_terms.extend(terms)
+    # Stack-led titles should not become primary merely because their
+    # description contains generic AI language. A Rails/Java/full-stack role
+    # belongs in the adjacent lane unless the title itself names a target
+    # AI/ML family. This keeps the candidate's primary ranking useful while
+    # preserving explicit AI roles for review.
+    stack_adjacent_in_title = any(
+        term in title
+        for term in (
+            "ruby on rails",
+            "rails",
+            "ruby",
+            "java",
+            "full-stack",
+            "full stack",
+            "frontend",
+            "backend",
+            "tech lead",
+        )
+    )
+    primary_title = any(term in title for term in primary_terms)
+    if stack_adjacent_in_title and not primary_title:
+        return "adjacent"
     if any(term in haystack for term in primary_terms):
         return "primary"
     if any(term in haystack for term in ADJACENT_TERMS):

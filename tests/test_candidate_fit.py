@@ -107,6 +107,21 @@ def test_adjacent_roles_are_separate_and_capped():
     assert assessment.final_priority_score <= 69
 
 
+def test_stack_led_roles_are_adjacent_even_when_descriptions_mention_ai():
+    for title in (
+        "Tech Lead Full-Stack Rails Engineer",
+        "Senior Java Backend Engineer",
+        "Ruby on Rails Software Engineer",
+    ):
+        job = normalize_job(
+            _job(
+                title,
+                "Full-time role building software for AI-enabled enterprise products.",
+            )
+        )
+        assert role_bucket(job, CandidatePreferences()) == "adjacent"
+
+
 def test_company_history_year_does_not_become_start_date_blocker():
     job = normalize_job(_job("Data Scientist", "Full-time role. The company was founded in 2014 and uses Python and SQL."))
     assessment = assess_eligibility(job, _profile(), CandidatePreferences(), role_fit_score=90, evidence_fit_score=85)
