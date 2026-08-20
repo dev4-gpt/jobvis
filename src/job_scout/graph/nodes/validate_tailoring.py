@@ -29,5 +29,11 @@ def validate_tailoring(state: AgentState) -> dict:
     ranked = next((r for r in state.get("ranked_jobs", []) if r.job.job_id == job_id), None)
     job_context = [f"{ranked.job.title} at {ranked.job.company}", ranked.job.company] if ranked else []
 
-    report = validate_pack(pack, corpus, research_notes=state.get("research_notes"), job_context=job_context)
+    report = validate_pack(
+        pack,
+        corpus,
+        research_notes=state.get("research_notes"),
+        job_context=job_context,
+        candidate_preferences=state.get("candidate_preferences"),
+    )
     return {"fabrication_flags": report.flags, "fabrication_report": report}

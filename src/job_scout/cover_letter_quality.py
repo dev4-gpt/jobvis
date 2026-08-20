@@ -60,6 +60,20 @@ _REQUIREMENT_MARKERS = (
     "familiarity",
     "looking for",
 )
+_AUTHORIZATION_CLAIM = re.compile(
+    r"\b(?:authorized to work|eligible to work|work authorization|visa|citizenship|"
+    r"sponsorship|sponsor(?:ship)?|h[- ]?1b|f[- ]?1|opt|stem opt)\b",
+    re.I,
+)
+_CLEARANCE_CLAIM = re.compile(
+    r"\b(?:security clearance|clearance|top secret|secret clearance|ts/sci|public trust|polygraph)\b",
+    re.I,
+)
+_UNCERTAINTY = re.compile(
+    r"\b(?:unknown|uncertain|unclear|confirm|confirmation|cannot|can't|not confirmed|"
+    r"not yet|pending|needs review|under review|to be determined)\b",
+    re.I,
+)
 
 
 def _words(text: str) -> list[str]:
@@ -81,7 +95,37 @@ def requirement_targets(description: str) -> list[str]:
     return _requirements(description)[:6]
 
 
-def evaluate_cover_letter(letter: str, job_description: str, corpus_text: str) -> CoverLetterQualityReport:
+def policy_claim_violations(
+    text: str,
+    *,
+    authorization_status: str = "unknown",
+    sponsorship_policy: str = "unknown",
+    clearance_status: str = "unknown",
+) -> list[str]:
+    """Find unconfirmed authorization or clearance claims in generated text."""
+    violations: list[str] = []
+    auth_known = authorization_status.lower() not in {"", "unknown", "unresolved", "pending"}
+    sponsorship_known = sponsorship_policy.lower() not in {"", "unknown", "unresolved", "pending"}
+    clearance_known = clearance_status.lower() not in {"", "unknown", "unresolved", "pending"}
+    for sentence in _sentences(str(text)):
+        authorization_violation = _AUTHORIZATION_CLAIM.search(sentence) and not (
+            auth_known or sponsorship_known or _UNCERTAINTY.search(sentence)
+        )
+        clearance_violation = _CLEARANCE_CLAIM.search(sentence) and not (clearance_known or _UNCERTAINTY.search(sentence))
+        if authorization_violation or clearance_violation:
+            violations.append(sentence)
+    return list(dict.fromkeys(violations))
+
+
+def evaluate_cover_letter(
+    letter: str,
+    job_description: str,
+    corpus_text: str,
+    *,
+    authorization_status: str = "unknown",
+    sponsorship_policy: str = "unknown",
+    clearance_status: str = "unknown",
+) -> CoverLetterQualityReport:
     """Return a reproducible quality report for one draft."""
     from job_scout.graph.schemas import CoverLetterQualityReport
 
@@ -97,6 +141,15 @@ def evaluate_cover_letter(letter: str, job_description: str, corpus_text: str) -
         reasons.append("cover letter is empty")
     if generic_phrases:
         reasons.append("cover letter contains generic or placeholder language")
+
+    policy_violations = policy_claim_violations(
+        normalized,
+        authorization_status=authorization_status,
+        sponsorship_policy=sponsorship_policy,
+        clearance_status=clearance_status,
+    )
+    if policy_violations:
+        reasons.append("cover letter contains unconfirmed authorization, sponsorship, visa, or clearance claims")
 
     corpus_items = [set(_words(sentence)) for sentence in _sentences(corpus_text)]
     evidence_matches = 0
@@ -126,6 +179,7 @@ def evaluate_cover_letter(letter: str, job_description: str, corpus_text: str) -
         requirement_matches=requirement_matches,
         requirement_targets=requirements,
         generic_phrases=generic_phrases,
+        policy_violations=policy_violations,
         passed=passed,
         reasons=reasons,
     )

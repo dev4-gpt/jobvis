@@ -565,11 +565,19 @@ def _pack_html(result: TailorResult) -> str:
     quality = result.cover_letter_quality
     quality_html = ""
     if quality is not None and not quality.passed:
+        policy_detail = ""
+        if quality.policy_violations:
+            policy_detail = (
+                "<br><span class='js-fab-reason'>Unconfirmed policy claim(s): "
+                + escape(" | ".join(quality.policy_violations[:2]))
+                + "</span>"
+            )
         quality_html = (
             '<div class="js-fab-warn"><b>⚠ Cover-letter quality gate needs review.</b>'
             f" The draft has {quality.word_count} words, {quality.evidence_matches} evidence points, and "
             f"{quality.requirement_matches} matched requirements. {escape('; '.join(quality.reasons))}"
-            f"<br><span class='js-fab-reason'>Gate targets: {escape(' | '.join(quality.requirement_targets[:2]))}</span></div>"
+            f"<br><span class='js-fab-reason'>Gate targets: {escape(' | '.join(quality.requirement_targets[:2]))}</span>"
+            f"{policy_detail}</div>"
         )
     honesty = ""
     if pack.honesty_note:

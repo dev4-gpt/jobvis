@@ -319,6 +319,7 @@ class CoverLetterQualityReport(BaseModel):
     requirement_matches: int = 0
     requirement_targets: list[str] = Field(default_factory=list)
     generic_phrases: list[str] = Field(default_factory=list)
+    policy_violations: list[str] = Field(default_factory=list)
     passed: bool = False
     reasons: list[str] = Field(default_factory=list)
 
@@ -350,6 +351,7 @@ class FabricationReport(BaseModel):
     confirmed_claims: int = 0
     near_miss_claims: int = 0
     unsupported_claims: int = 0
+    policy_violations: list[str] = Field(default_factory=list)
     # The knob values this report ran with — recorded so every trace states
     # what produced the flags, making threshold tuning measurable in Opik.
     thresholds: dict[str, float] = Field(default_factory=dict)

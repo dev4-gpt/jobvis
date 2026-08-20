@@ -156,6 +156,8 @@ def tailor(state: AgentState) -> dict:
         errors.append(f"tailor: selected job id {job_id!r} is not among the {len(ranked_jobs)} ranked jobs on this thread")
         return {"tailoring": None, "errors": errors}
 
+    preferences = preferences_from_dict(state.get("candidate_preferences"))
+
     try:
         corpus = build_corpus(state.get("cv_text", ""), state.get("linkedin_zip_path"))
     except ValueError as exc:  # bad LinkedIn upload — degrade to CV-only
@@ -200,7 +202,14 @@ def tailor(state: AgentState) -> dict:
     # Links are source metadata, not LLM content. Re-attach them after every
     # response so a model can never silently discard a clickable resume link.
     pack.cv.links = list(state.get("cv_links", []))
-    quality = evaluate_cover_letter(pack.cover_letter, ranked.job.description, "\n".join(item.text for item in corpus.items))
+    quality = evaluate_cover_letter(
+        pack.cover_letter,
+        ranked.job.description,
+        "\n".join(item.text for item in corpus.items),
+        authorization_status=preferences.authorization_status,
+        sponsorship_policy=preferences.sponsorship_policy,
+        clearance_status=preferences.clearance_status,
+    )
     total_calls = calls + calls_used
     if not quality.passed and total_calls < settings.max_llm_calls_per_run:
         targets = requirement_targets(ranked.job.description)
@@ -230,6 +239,9 @@ def tailor(state: AgentState) -> dict:
                 pack.cover_letter,
                 ranked.job.description,
                 "\n".join(item.text for item in corpus.items),
+                authorization_status=preferences.authorization_status,
+                sponsorship_policy=preferences.sponsorship_policy,
+                clearance_status=preferences.clearance_status,
             )
     if not quality.passed:
         errors.append("tailor: cover-letter quality gate failed — review or regenerate before sending")

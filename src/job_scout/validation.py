@@ -41,6 +41,7 @@ from difflib import SequenceMatcher
 
 from job_scout.config import get_settings
 from job_scout.corpus import CandidateCorpus
+from job_scout.cover_letter_quality import policy_claim_violations
 from job_scout.graph.schemas import FabricationReport, FlaggedClaim, TailoringPack
 
 _MIN_FACTUAL_SENTENCE_WORDS = 6
@@ -130,6 +131,7 @@ def validate_pack(
     corpus: CandidateCorpus,
     research_notes: str | None = None,
     job_context: list[str] | None = None,
+    candidate_preferences: object | None = None,
 ) -> FabricationReport:
     """Check every claim in the pack against the corpus. Deterministic, no LLM.
 
@@ -145,6 +147,16 @@ def validate_pack(
     confirmed_claims = 0
     near_miss_claims = 0
     unsupported_claims = 0
+
+    preferences = candidate_preferences
+    if isinstance(preferences, dict):
+        authorization_status = str(preferences.get("authorization_status", "unknown"))
+        sponsorship_policy = str(preferences.get("sponsorship_policy", "unknown"))
+        clearance_status = str(preferences.get("clearance_status", "unknown"))
+    else:
+        authorization_status = str(getattr(preferences, "authorization_status", "unknown"))
+        sponsorship_policy = str(getattr(preferences, "sponsorship_policy", "unknown"))
+        clearance_status = str(getattr(preferences, "clearance_status", "unknown"))
 
     # 1. CV bullets: the corpus_ref must resolve and the rewrite must stay close.
     for entry in pack.cv.experience:
@@ -271,6 +283,38 @@ def validate_pack(
         else:
             confirmed_claims += 1
 
+    # 4. Human-policy claims: authorization, visa, sponsorship, and clearance
+    #    are never facts that may be inferred from a CV. Check the whole pack,
+    #    including the summary, because a model can put the claim outside the
+    #    cover letter where the sentence-level evidence gate would not see it.
+    policy_text = "\n".join(
+        [
+            pack.cv.headline,
+            pack.cv.summary,
+            *(bullet.text for entry in (*pack.cv.experience, *pack.cv.projects) for bullet in entry.bullets),
+            *pack.cv.skills,
+            *pack.cv.education,
+            pack.cover_letter,
+        ]
+    )
+    policy_violations = policy_claim_violations(
+        policy_text,
+        authorization_status=authorization_status,
+        sponsorship_policy=sponsorship_policy,
+        clearance_status=clearance_status,
+    )
+    for sentence in policy_violations:
+        claims_checked += 1
+        unsupported_claims += 1
+        flagged.append(
+            FlaggedClaim(
+                where="policy:unconfirmed_status",
+                text=sentence,
+                reason="authorization, visa, sponsorship, or clearance status is not confirmed by candidate policy",
+                classification="unsupported",
+            )
+        )
+
     return FabricationReport(
         flags=len(flagged),
         claims_checked=claims_checked,
@@ -278,5 +322,6 @@ def validate_pack(
         confirmed_claims=confirmed_claims,
         near_miss_claims=near_miss_claims,
         unsupported_claims=unsupported_claims,
+        policy_violations=policy_violations,
         thresholds={"bullet": bullet_ratio, "skill": skill_ratio, "letter": letter_ratio},
     )

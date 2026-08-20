@@ -12,7 +12,7 @@ from pypdf.annotations import Link
 from job_scout.application.answers import AnswerMemory
 from job_scout.application.ats import ApplicantFacts, ATSName, discover_fields, propose_mappings
 from job_scout.application.controller import ApplicationController
-from job_scout.cover_letter_quality import evaluate_cover_letter
+from job_scout.cover_letter_quality import evaluate_cover_letter, policy_claim_violations
 from job_scout.graph.schemas import CVContent, CVLink
 from job_scout.renderer import render_pdf
 from job_scout.tools.cv_reader import extract_cv_document
@@ -62,6 +62,19 @@ def test_cover_letter_quality_rejects_empty_and_generic():
     assert report.passed is False
     assert report.reasons
     assert report.generic_phrases
+
+
+def test_cover_letter_quality_rejects_unconfirmed_policy_claims():
+    report = evaluate_cover_letter(
+        "Dear team. "
+        + "I built Python systems and measured outcomes. " * 30
+        + "I am authorized to work in the United States. Best, Person",
+        "Python experience required.",
+        "Built Python systems and measured outcomes.",
+    )
+    assert report.passed is False
+    assert report.policy_violations
+    assert policy_claim_violations("Authorization remains unconfirmed.") == []
 
 
 def test_cover_letter_quality_accepts_evidence_and_requirements():

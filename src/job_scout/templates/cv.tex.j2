@@ -32,6 +32,7 @@
 <% if cv.experience %>
 \sectionrule{Experience}
 <% for entry in cv.experience %>
+\begin{samepage}
 {\bfseries << entry.role | tex >>} --- << entry.company | tex >><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
 <% if entry.bullets %>
 \begin{itemize}
@@ -40,12 +41,14 @@
 <% endfor %>
 \end{itemize}
 <% endif %>
+\end{samepage}
 <% endfor %>
 <% endif %>
 
 <% if cv.projects %>
 \sectionrule{Selected Projects}
 <% for entry in cv.projects %>
+\begin{samepage}
 {\bfseries << entry.role | tex >>}<% if entry.company %> --- << entry.company | tex >><% endif %><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
 <% if entry.bullets %>
 \begin{itemize}
@@ -54,6 +57,7 @@
 <% endfor %>
 \end{itemize}
 <% endif %>
+\end{samepage}
 <% endfor %>
 <% endif %>
 
