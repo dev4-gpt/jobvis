@@ -27,6 +27,30 @@ def test_extract_profile_recovers_from_empty_structured_response(monkeypatch, sa
     assert result == sample_profile
 
 
+def test_extract_profile_uses_source_grounded_fallback_when_provider_fails(monkeypatch):
+    def fail_model(*args, **kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(profile_mod, "get_chat_model", fail_model)
+    result = extract_profile(
+        "Aryaman Singh Dev\n"
+        "Data Scientist Intern\n"
+        "Built predictive maintenance models with Python.\n"
+        "Built a GenAI RAG pipeline with LangChain.\n"
+        "TECHNICAL SKILLS & SOFTWARES PROFICIENCY\n"
+        "Python, LangChain, FAISS\n"
+        "Penn State M.S. Artificial Intelligence August 2025-December 2026\n"
+        "(484) 735-7279"
+    )
+
+    assert result.name == "Aryaman Singh Dev"
+    assert "Data Scientist" in result.primary_roles
+    assert "python" in result.skills
+    assert result.expected_graduation_date.isoformat() == "2026-12-01"
+    assert result.phone == "(484) 735-7279"
+    assert result.resume_evidence_refs
+
+
 def test_resume_facts_augment_education_timeline(sample_profile):
     result = _augment_resume_facts(
         sample_profile,

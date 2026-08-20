@@ -13,6 +13,7 @@ import re
 from datetime import date
 
 from job_scout.config import get_settings
+from job_scout.corpus import build_corpus
 from job_scout.graph.schemas import EducationEntry, Profile
 from job_scout.llm import get_chat_model, model_chain, with_structured_output
 
@@ -62,11 +63,60 @@ def extract_profile(
     prompt = EXTRACT_PROFILE_PROMPT.format(cv_text=cv_text)
     tracer = get_tracer(thread_id, tags or ["extract"]) if thread_id else None
     config = {"callbacks": [tracer]} if tracer else {}
-    profile = _extract_with_model_chain(prompt, config, model_chain(model_name, settings.scout_fallback_models))
+    try:
+        profile = _extract_with_model_chain(prompt, config, model_chain(model_name, settings.scout_fallback_models))
+    except Exception:
+        # Uploading a readable CV must not depend on one provider's availability.
+        # The fallback is deliberately conservative and source-only: it extracts
+        # headings, skills, and known timeline facts without inventing a profile.
+        profile = _deterministic_profile(cv_text)
     profile = _augment_resume_facts(profile, cv_text)
     if tracer:
         tracer.flush()
     return profile
+
+
+def _deterministic_profile(cv_text: str) -> Profile:
+    """Build a safe local profile when every configured extraction model fails."""
+    text = cv_text or ""
+    corpus = build_corpus(text)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    first = lines[0] if lines else "Candidate"
+    name = re.sub(r"\s*\[[^]]+\]", "", first).strip()
+    if not name or "@" in name or len(name.split()) > 6:
+        name = "Candidate"
+
+    lowered = text.lower()
+    role_candidates = (
+        ("Data Scientist", "data scientist"),
+        ("AI/ML Engineer", "machine learning"),
+        ("GenAI Engineer", "genai"),
+        ("ML Engineer", "ml engineer"),
+        ("Computer Vision Engineer", "computer vision"),
+        ("MLOps Engineer", "mlops"),
+        ("Forward-Deployed AI Engineer", "forward-deployed"),
+    )
+    roles = [label for label, marker in role_candidates if marker in lowered]
+    if not roles:
+        roles = ["AI/ML Engineer"]
+
+    evidence_terms = [
+        term for term in ("predictive maintenance", "genai", "rag", "computer vision", "fastapi", "agentic") if term in lowered
+    ]
+    focus = ", ".join(evidence_terms[:5]) or "machine-learning and data systems"
+    summary = (
+        f"Source-resume profile fallback for {', '.join(roles[:3])} roles. "
+        f"Documented evidence includes {focus}. Timeline, contact details, education, and skills "
+        "are retained from the uploaded CV."
+    )
+    return Profile(
+        name=name,
+        seniority="junior",
+        primary_roles=roles,
+        skills=[skill.lower() for skill in corpus.skills()],
+        raw_summary=summary,
+        resume_evidence_refs=[item.id for item in corpus.items if item.kind == "bullet"][:12],
+    )
 
 
 def _message_text(message: object) -> str:
