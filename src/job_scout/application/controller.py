@@ -53,6 +53,18 @@ class ApplicationController:
             return self.state.public()
         try:
             page = self.browser.open(ranked.job.url)
+            if page is None:
+                self.state = ApplicationState(
+                    job_id=ranked.job.job_id,
+                    url=ranked.job.url,
+                    status="opened_manual",
+                    message=(
+                        "Opened the application in a private browser window. "
+                        "Install `uv sync --extra application` and run `uv run playwright install chromium` "
+                        "to enable form inspection and approved safe-field filling."
+                    ),
+                )
+                return self.state.public()
             inspection = discover_fields(page.url, page.content())
         except Exception as exc:  # noqa: BLE001 - browser errors become a visible pause, never a crash
             self.state = ApplicationState(job_id=ranked.job.job_id, url=ranked.job.url, status="blocked", message=str(exc))

@@ -19,7 +19,7 @@ from job_scout.cover_letter_quality import (
     policy_claim_violations,
     remove_unconfirmed_policy_sentences,
 )
-from job_scout.graph.schemas import CVContent, CVLink
+from job_scout.graph.schemas import CVContent, CVLink, JobPosting, RankedJob
 from job_scout.renderer import render_pdf
 from job_scout.tools.cv_reader import extract_cv_document
 
@@ -180,6 +180,28 @@ def test_application_controller_has_no_submit_operation():
     controller = ApplicationController()
     assert not hasattr(controller, "submit")
     assert not hasattr(controller.browser, "submit")
+
+
+def test_application_controller_reports_manual_browser_fallback(monkeypatch):
+    controller = ApplicationController()
+    monkeypatch.setattr(controller.browser, "open", lambda url: None)
+    ranked = RankedJob(
+        job=JobPosting(
+            job_id="job-1",
+            title="AI Engineer",
+            company="Acme",
+            location="Remote",
+            url="https://acme.example/apply",
+            source="cache",
+        ),
+        fit_score=80,
+        fit_explanation="Relevant role.",
+    )
+
+    state = controller.open(ranked, type("ProfileStub", (), {"name": "Person", "locations": []})(), [])
+
+    assert state["status"] == "opened_manual"
+    assert "private browser window" in state["message"]
 
 
 def test_file_uploads_require_individual_approval(tmp_path):

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from job_scout.application.ats import FormInspection, _field_key, discover_fields
@@ -29,7 +31,13 @@ class VisibleApplicationBrowser:
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
-            raise BrowserUnavailable("Install the optional application extra and run `playwright install chromium`.") from exc
+            # Opening the posting is useful even when the optional automation
+            # extra is not installed. Use a fresh, private browser profile so
+            # credentials/cookies from the user's normal browser are neither
+            # read nor persisted by Jobvis. Form inspection and safe filling
+            # still require Playwright and remain unavailable until the extra
+            # is installed.
+            return self._open_without_playwright(url, cause=exc)
         self._playwright = sync_playwright().start()
         executable = os.environ.get("JOBVIS_BROWSER_EXECUTABLE") or _brave_path()
         kwargs = {"headless": False}
@@ -45,6 +53,25 @@ class VisibleApplicationBrowser:
         self._page = self._context.new_page()
         self._page.goto(url, wait_until="domcontentloaded")
         return self._page
+
+    def _open_without_playwright(self, url: str, *, cause: ImportError):
+        executable = os.environ.get("JOBVIS_BROWSER_EXECUTABLE") or _brave_path()
+        if not executable:
+            raise BrowserUnavailable(
+                "Could not find Brave or another Chromium browser. Set JOBVIS_BROWSER_EXECUTABLE, "
+                "or install the optional application extra with `uv sync --extra application`."
+            ) from cause
+        profile_dir = Path(tempfile.mkdtemp(prefix="jobvis-application-"))
+        try:
+            subprocess.Popen(
+                [executable, f"--user-data-dir={profile_dir}", "--incognito", "--new-window", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise BrowserUnavailable(f"Could not open the local browser: {exc}") from exc
+        return None
 
     def inspect(self, url: str | None = None) -> FormInspection:
         if self._page is None:
