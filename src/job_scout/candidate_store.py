@@ -49,10 +49,13 @@ def save_candidate(profile: Profile, cv_text: str, preferences: dict | None = No
     _STORE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": 4,
-        "profile": profile.model_dump(),
+        # Profiles contain date fields for education and expected graduation;
+        # JSON mode is required because this file is written directly with
+        # json.dumps rather than through a Pydantic serializer.
+        "profile": profile.model_dump(mode="json"),
         "cv_text": cv_text,
         "preferences": preferences,
-        "cv_links": [link.model_dump() for link in (cv_links or [])],
+        "cv_links": [link.model_dump(mode="json") for link in (cv_links or [])],
     }
     _STORE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

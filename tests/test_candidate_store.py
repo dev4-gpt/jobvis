@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 import job_scout.app as app_module
@@ -24,6 +26,14 @@ def test_save_load_roundtrip(tmp_store, sample_profile):
     assert stored.profile == sample_profile
     assert stored.cv_text == "cv text here"
     assert stored.preferences is None
+
+
+def test_save_load_roundtrip_serializes_profile_dates(tmp_store, sample_profile):
+    profile = sample_profile.model_copy(update={"expected_graduation_date": date(2026, 12, 1)})
+    tmp_store.save_candidate(profile, "cv text here")
+    stored = tmp_store.load_candidate()
+    assert stored is not None
+    assert stored.profile.expected_graduation_date == date(2026, 12, 1)
 
 
 def test_preferences_roundtrip(tmp_store, sample_profile):
