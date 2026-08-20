@@ -16,6 +16,13 @@ if TYPE_CHECKING:
     from job_scout.graph.schemas import CandidatePreferences, JobPosting, Profile
 
 _INTERNSHIP = re.compile(r"\b(intern(ship)?|co[- ]?op|student|summer analyst|research intern)\b", re.I)
+_EXPLICIT_INTERNSHIP = re.compile(
+    r"\b(?:summer\s+)?internship\s+(?:position|role|program|opportunity|for)\b|"
+    r"\b(?:intern|co[- ]?op)\s+(?:position|role|program|opportunity|for)\b|"
+    r"\bstudent\s+(?:position|role|program|opportunity)\b|"
+    r"\bsummer\s+analyst\b|\bresearch\s+intern\b",
+    re.I,
+)
 _PART_TIME = re.compile(r"\b(part[- ]?time|temporary|seasonal|volunteer)\b", re.I)
 _FULL_TIME = re.compile(r"\b(full[- ]?time|permanent)\b", re.I)
 _CLEARANCE = re.compile(r"\b(clearance|security clearance|secret|top secret|ts/sci|polygraph|public trust)\b", re.I)
@@ -134,12 +141,17 @@ def normalize_job(job: JobPosting) -> JobPosting:
         employment = "co_op"
     elif job.employment_type != "unknown":
         employment = job.employment_type
-    elif _INTERNSHIP.search(text):
+    elif _EXPLICIT_INTERNSHIP.search(text):
         employment = "internship" if "intern" in text.lower() else "co_op"
     elif _PART_TIME.search(text):
         employment = "part_time"
     elif _FULL_TIME.search(text):
         employment = "full_time"
+    elif _INTERNSHIP.search(text):
+        # A generic mention such as "internship experience" is not enough to
+        # block a full-time role; retain uncertainty and let the UI request
+        # review instead of silently excluding a valid new-grad posting.
+        employment = "unknown"
     else:
         employment = "unknown"
 

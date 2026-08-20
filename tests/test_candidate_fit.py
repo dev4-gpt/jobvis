@@ -150,6 +150,18 @@ def test_known_full_time_metadata_survives_internship_context():
     assert normalize_job(job).employment_type == "full_time"
 
 
+def test_internship_experience_mention_does_not_block_full_time_role():
+    job = normalize_job(_job("Data Scientist", "Full-time role; internship experience is welcome."))
+    assert job.employment_type == "full_time"
+
+
+def test_explicit_internship_position_is_still_blocked():
+    job = normalize_job(_job("Data Scientist", "This is a summer internship position for 2027."))
+    assessment = assess_eligibility(job, _profile(), CandidatePreferences(), role_fit_score=90, evidence_fit_score=80)
+    assert job.employment_type == "internship"
+    assert assessment.status == "blocked"
+
+
 def test_clearance_not_required_is_not_a_blocker():
     job = normalize_job(_job("AI Engineer", "Full-time role; security clearance not required; Python and RAG."))
     assessment = assess_eligibility(job, _profile(), CandidatePreferences(), role_fit_score=90, evidence_fit_score=85)
