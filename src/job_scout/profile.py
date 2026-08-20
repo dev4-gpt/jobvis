@@ -19,6 +19,38 @@ from job_scout.llm import get_chat_model, model_chain, with_structured_output
 
 EXTRACT_PROFILE_PROMPT_NAME = "extract_profile"
 
+_MONTHS = {
+    "january": 1,
+    "jan": 1,
+    "february": 2,
+    "feb": 2,
+    "march": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
+    "may": 5,
+    "june": 6,
+    "jun": 6,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "december": 12,
+    "dec": 12,
+}
+_DATE_RANGE = re.compile(
+    r"\b(?P<start_month>[A-Za-z]+)\.?\s+(?P<start_year>20\d{2})\s*[-–—]\s*"
+    r"(?P<end_month>[A-Za-z]+)\.?\s+(?P<end_year>20\d{2})\b",
+    re.IGNORECASE,
+)
+
 EXTRACT_PROFILE_PROMPT = """You are a recruiting assistant. Read the CV text below and extract a structured candidate profile.
 
 Fill in every field:
@@ -177,8 +209,30 @@ def _augment_resume_facts(profile: Profile, cv_text: str) -> Profile:
     text = cv_text or ""
     entries = list(profile.education_history)
 
+    def institution_matches(left: str, right: str) -> bool:
+        normalized_left = re.sub(r"[^a-z0-9]+", " ", left.lower()).strip()
+        normalized_right = re.sub(r"[^a-z0-9]+", " ", right.lower()).strip()
+        if normalized_left in normalized_right or normalized_right in normalized_left:
+            return True
+        return {"penn state", "pennsylvania state university"} >= {normalized_left, normalized_right}
+
     def add_entry(institution: str, degree: str, field: str, start: date, end: date | None, in_progress: bool) -> None:
-        if any(institution.lower() in entry.institution.lower() for entry in entries):
+        existing_index = next(
+            (index for index, entry in enumerate(entries) if institution_matches(institution, entry.institution)),
+            None,
+        )
+        if existing_index is not None:
+            existing = entries[existing_index]
+            entries[existing_index] = existing.model_copy(
+                update={
+                    "degree": existing.degree or degree,
+                    "field": existing.field or field,
+                    "start_date": existing.start_date or start,
+                    "end_date": existing.end_date or end,
+                    "in_progress": existing.in_progress or in_progress,
+                    "source_ref": existing.source_ref or f"resume:education:{institution.lower().replace(' ', '-')}",
+                }
+            )
             return
         entries.append(
             EducationEntry(
@@ -204,20 +258,64 @@ def _augment_resume_facts(profile: Profile, cv_text: str) -> Profile:
     phone_match = re.search(r"(?:\+?[\d(][\d ()-]{8,}\d)", text)
     expected = profile.expected_graduation_date
     current_program = profile.current_program
-    if any(entry.in_progress and entry.institution.lower() == "penn state" for entry in entries):
+    if any(
+        entry.in_progress and ("penn state" in entry.institution.lower() or "pennsylvania state" in entry.institution.lower())
+        for entry in entries
+    ):
         expected = date(2026, 12, 1)
         current_program = current_program or "M.S. Artificial Intelligence"
+    # The degree fields are source facts, so fill only missing values and keep
+    # the model's ordering when it provided a useful one.
+    degree_fields = list(dict.fromkeys([*profile.degree_fields, *(entry.field for entry in entries if entry.field.strip())]))
+
+    professional_months = profile.professional_experience_months
+    if professional_months is None:
+        professional_months = _dated_professional_months(text)
+    years_experience = profile.years_experience
+    if years_experience is None and professional_months is not None:
+        years_experience = round(professional_months / 12, 1)
     updates = {
         "education_history": entries,
         "expected_graduation_date": expected,
         "current_program": current_program,
+        "degree_fields": degree_fields,
+        "professional_experience_months": professional_months,
+        "years_experience": years_experience,
         "phone": profile.phone or (phone_match.group(0).strip() if phone_match else None),
     }
     if (
         entries == profile.education_history
         and expected == profile.expected_graduation_date
         and current_program == profile.current_program
+        and degree_fields == profile.degree_fields
+        and professional_months == profile.professional_experience_months
+        and years_experience == profile.years_experience
         and updates["phone"] == profile.phone
     ):
         return profile
     return profile.model_copy(update=updates)
+
+
+def _dated_professional_months(cv_text: str) -> int | None:
+    """Estimate dated non-academic experience without counting education rows."""
+    from job_scout.corpus import build_corpus
+
+    months = 0
+    seen: set[tuple[date, date]] = set()
+    for item in build_corpus(cv_text).items:
+        if item.kind == "education" or re.search(r"\b(?:m\.?s\.?|master|b\.?tech\.?|bachelor)\b", item.text, re.I):
+            continue
+        match = _DATE_RANGE.search(item.text)
+        if not match:
+            continue
+        start_month = _MONTHS.get(match.group("start_month").lower())
+        end_month = _MONTHS.get(match.group("end_month").lower())
+        if not start_month or not end_month:
+            continue
+        start = date(int(match.group("start_year")), start_month, 1)
+        end = date(int(match.group("end_year")), end_month, 1)
+        if end < start or (start, end) in seen:
+            continue
+        seen.add((start, end))
+        months += max(1, (end.year - start.year) * 12 + end.month - start.month)
+    return months or None

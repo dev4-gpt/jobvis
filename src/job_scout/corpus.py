@@ -47,6 +47,12 @@ _PIPES = re.compile(r"\s*\|\s*")
 _LOCATIONISH = re.compile(r",\s*(?:[A-Z]{2}|India|Singapore|Germany|Canada|Australia|United Kingdom)\s*$")
 _COUNTRYISH = re.compile(r"\b(?:India|Singapore|Germany|Canada|Australia)\s*$")
 
+# PDF extraction can drop the visual column boundary in a skills row.  These
+# are the small, deterministic boundaries needed by the supported resume
+# layouts; they do not invent skills, they only restore separators that were
+# already present in the source text.
+_ADJACENT_SKILL_BOUNDARIES = ((re.compile(r"^GCP\s+(?=Machine Learning\b)", re.IGNORECASE), "GCP "),)
+
 # LinkedIn export files we understand. Official exports vary by account and
 # region; every file is optional and anything missing is silently skipped.
 _LI_POSITIONS = "Positions.csv"
@@ -142,6 +148,47 @@ def _section_kind(heading: str) -> CorpusKind:
     return "bullet"
 
 
+def _split_skill_line(line: str) -> list[str]:
+    """Split a skills row without breaking parenthesized skill names.
+
+    Resume PDFs commonly extract ``Fine-tuning (LoRA, QLoRA) Git`` from a
+    visually separated row.  A plain ``str.split(',')`` turns that into two
+    invalid skills and glues ``Git`` to the second one.  Track parentheses,
+    then restore only boundaries that are unambiguous in the source text.
+    """
+    pieces: list[str] = []
+    start = 0
+    depth = 0
+    for index, char in enumerate(line):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        elif char == "," and depth == 0:
+            pieces.append(line[start:index].strip())
+            start = index + 1
+    pieces.append(line[start:].strip())
+
+    normalized: list[str] = []
+    for piece in pieces:
+        piece = piece.rstrip(".").strip()
+        # A closing parenthesis followed by a capitalized token is a PDF
+        # column boundary, not part of the skill name (e.g. ``) Git``).
+        piece = re.sub(r"\)\s+(?=[A-Z][A-Za-z0-9+#.-]*(?:\s|$))", ")\n", piece)
+        for fragment in piece.splitlines():
+            fragment = fragment.strip()
+            if not fragment:
+                continue
+            for pattern, prefix in _ADJACENT_SKILL_BOUNDARIES:
+                if pattern.search(fragment):
+                    fragment = pattern.sub("", fragment, count=1).strip()
+                    normalized.append(prefix.strip())
+                    break
+            if fragment:
+                normalized.append(fragment)
+    return normalized
+
+
 def _logical_lines(cv_text: str) -> list[str]:
     """Re-join PDF-wrapped lines into logical ones.
 
@@ -205,7 +252,7 @@ def _segment_cv(cv_text: str) -> list[CorpusItem]:
             kind = _section_kind(line)
             continue
         if kind == "skill":
-            for skill in line.rstrip(".").split(","):
+            for skill in _split_skill_line(line):
                 add(skill, "skill", section)
         elif kind in ("summary", "education"):
             add(line, kind, section)

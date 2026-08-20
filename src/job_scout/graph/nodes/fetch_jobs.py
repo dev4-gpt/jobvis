@@ -261,9 +261,7 @@ def fetch_jobs(state: AgentState) -> dict:
         # tool request should still let the source cascade run with the
         # candidate's first explicit role. Ranking remains the meaningful
         # model-gated step and will report its own failure if necessary.
-        errors.append(
-            f"fetch_jobs: all configured fetch models failed ({', '.join(model_names)}); " "used a profile-derived query"
-        )
+        errors.append(f"fetch_jobs: all configured fetch models failed ({', '.join(model_names)}); used a profile-derived query")
         query = " ".join(profile.primary_roles[:2]) or " ".join(profile.skills[:3]) or "data scientist"
         query, dropped = _trim_query(query)
         model_country = None

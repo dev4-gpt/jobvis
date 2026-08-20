@@ -152,6 +152,24 @@ Python, SQL, PyTorch, Docker, FastAPI.
     assert any("efficiency by 3%" in bullet for bullet in bullets)
 
 
+def test_pdf_skill_row_keeps_parenthesized_and_adjacent_skills_separate():
+    """PDF column extraction must not create malformed ATS skill tokens."""
+    cv = """\
+TECHNICAL SKILLS & SOFTWARES PROFICIENCY
+Python, AWS, GCP Machine Learning, Deep Learning, Fine-tuning (LoRA, QLoRA) Git, Docker.
+"""
+    assert build_corpus(cv).skills() == [
+        "Python",
+        "AWS",
+        "GCP",
+        "Machine Learning",
+        "Deep Learning",
+        "Fine-tuning (LoRA, QLoRA)",
+        "Git",
+        "Docker",
+    ]
+
+
 def test_pipe_rows_keep_content_but_drop_contacts():
     cv = """\
 Experience

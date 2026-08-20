@@ -67,8 +67,21 @@ def test_resume_facts_augment_education_timeline(sample_profile):
 def test_resume_facts_recognize_full_penn_state_name(sample_profile):
     result = _augment_resume_facts(
         sample_profile,
-        "Pennsylvania State University\n" "Master of Science in Artificial Intelligence August 2025-December 2026\n",
+        "Pennsylvania State University\nMaster of Science in Artificial Intelligence August 2025-December 2026\n",
     )
     assert result.expected_graduation_date.isoformat() == "2026-12-01"
     assert result.current_program == "M.S. Artificial Intelligence"
     assert result.education_history[0].institution == "Penn State"
+
+
+def test_resume_facts_fill_degree_fields_and_dated_experience(sample_profile):
+    result = _augment_resume_facts(
+        sample_profile.model_copy(update={"years_experience": None}),
+        "Data Scientist Intern January 2024 – July 2024\n"
+        "AI Intern July 2023 - August 2023\n"
+        "Research Assistant June 2023 - July 2023\n"
+        "Penn State M.S. Artificial Intelligence August 2025-December 2026\n",
+    )
+    assert result.degree_fields == ["Artificial Intelligence"]
+    assert result.professional_experience_months == 8
+    assert result.years_experience == 0.7
