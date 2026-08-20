@@ -7,8 +7,8 @@ from dataclasses import replace
 import pytest
 
 import job_scout.app as app_mod
-from job_scout.app import on_find, on_tailor, on_zip, reset
-from job_scout.graph.schemas import CVContent, RankedJob, TailoringPack
+from job_scout.app import _cv_preview_html, on_find, on_tailor, on_zip, reset
+from job_scout.graph.schemas import CVContent, ExperienceEntry, RankedJob, TailoredBullet, TailoringPack
 from job_scout.renderer import RenderResult
 from job_scout.runner import RunResult, TailorResult
 from tests.conftest import make_job
@@ -58,6 +58,20 @@ def test_on_find_populates_job_dropdown(monkeypatch, sample_profile):
 def test_location_chooser_always_includes_us_scope(sample_profile):
     choices, _ = app_mod._preference_selection(sample_profile, None)
     assert app_mod.US_SCOPE_CHOICE in choices
+
+
+def test_cv_preview_hides_internal_corpus_ids():
+    pack = _tailor_result().pack
+    pack.cv.experience = [
+        ExperienceEntry(
+            role="Data Scientist",
+            company="Example",
+            bullets=[TailoredBullet(text="Built a grounded model", corpus_ref="cv-bullet-001")],
+        )
+    ]
+    html = _cv_preview_html(pack)
+    assert "cv-bullet-001" not in html
+    assert "verified evidence" in html
 
 
 def test_target_policy_controls_are_authoritative(sample_profile):

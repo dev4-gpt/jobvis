@@ -105,6 +105,18 @@ def test_render_tex_includes_selected_projects_and_clickable_links():
     assert r"\href{mailto:person@example.com}{Email}" in tex
 
 
+def test_render_tex_preserves_visible_contact_metadata():
+    cv = CVContent(
+        headline="AI Engineer",
+        summary="Builds grounded systems.",
+        email="person@example.com",
+        phone="(484) 735-7279",
+    )
+    tex = render_tex(cv, candidate_name="Jane")
+    assert "person@example.com" in tex
+    assert r"(484) 735-7279" in tex
+
+
 def test_render_cover_letter_normalizes_html_and_escapes_latex():
     letter = "Dear team,<br><br>I built 100% reliable APIs & data tools.<br>Best, Jane"
     assert normalize_cover_letter(letter) == "Dear team,\n\nI built 100% reliable APIs & data tools.\nBest, Jane"

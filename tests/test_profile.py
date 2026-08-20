@@ -62,3 +62,13 @@ def test_resume_facts_augment_education_timeline(sample_profile):
     assert result.expected_graduation_date.isoformat() == "2026-12-01"
     assert [entry.institution for entry in result.education_history] == ["Penn State", "NYU", "Manipal"]
     assert result.phone == "(484) 735-7279"
+
+
+def test_resume_facts_recognize_full_penn_state_name(sample_profile):
+    result = _augment_resume_facts(
+        sample_profile,
+        "Pennsylvania State University\n" "Master of Science in Artificial Intelligence August 2025-December 2026\n",
+    )
+    assert result.expected_graduation_date.isoformat() == "2026-12-01"
+    assert result.current_program == "M.S. Artificial Intelligence"
+    assert result.education_history[0].institution == "Penn State"

@@ -21,6 +21,11 @@
 {\LARGE\bfseries << name | tex >>}\\[2pt]
 {\itshape << cv.headline | tex >>}
 
+<% if cv.email or cv.phone %>
+\smallskip
+<% if cv.email %><< cv.email | tex >><% endif %><% if cv.email and cv.phone %> \\textbar{} <% endif %><% if cv.phone %><< cv.phone | tex >><% endif %>
+<% endif %>
+
 <% if cv.links %>
 \smallskip
 <% for link in cv.links %>

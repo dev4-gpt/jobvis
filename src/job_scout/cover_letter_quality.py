@@ -257,11 +257,26 @@ def grounded_fallback_letter(
         words = str(value).replace("\n", " ").split()
         return " ".join(words[:limit]).rstrip(" ,;:")
 
+    def clean_requirement(value: str) -> str:
+        """Turn a job-board sentence into a readable clause without inventing facts."""
+        text = re.sub(r"\s+", " ", str(value)).strip(" .;:")
+        text = re.sub(
+            r"^(?:the\s+)?[A-Za-z][A-Za-z /-]{1,50}\s+(?:will|should|must|is expected to)\s+",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(r"\bstrong technical background and knowledge and to\b", "technical analysis to", text, flags=re.I)
+        text = re.sub(r"\s+and\s+to\s+", " to ", text, flags=re.I)
+        return clip(text, 20).rstrip(" .;:") or "building reliable systems"
+
     title = clip(job_title, 12) or "this role"
     employer = clip(company, 10) or "your team"
     requirements = requirement_targets(job_description)
-    first_requirement = clip(requirements[0], 18) if requirements else "building reliable AI systems"
-    second_requirement = clip(requirements[1], 18) if len(requirements) > 1 else "communicating technical results clearly"
+    first_requirement = clean_requirement(requirements[0]) if requirements else "building reliable AI systems"
+    second_requirement = (
+        clean_requirement(requirements[1]) if len(requirements) > 1 else "communicating technical results clearly"
+    )
     evidence = [clip(item, 34) for item in corpus_items if str(item).strip()]
     evidence = evidence[:3]
     while len(evidence) < 3:
@@ -270,19 +285,19 @@ def grounded_fallback_letter(
     return (
         f"Dear {employer} hiring team,\n\n"
         f"I am applying for the {title} role because the posting emphasizes {first_requirement} and "
-        f"{second_requirement}. Those priorities match the way I have built and evaluated practical AI systems. "
-        f"I am seeking a full-time opportunity beginning in the candidate's selected start window, and I would "
-        f"welcome the chance to discuss how my experience could support {employer}'s team.\n\n"
-        f"My experience includes this evidence from my resume: {evidence[0]}. I also documented the following work: "
-        f"{evidence[1]}. Together, these examples show hands-on work across model development, software delivery, "
-        f"and technical problem solving. I would apply that same disciplined process to a new team and product. "
-        f"I value clear ownership, reproducible work, measurable outcomes, and respectful collaboration across disciplines. "
-        f"A further project is described as follows: {evidence[2]}. I would bring "
-        f"careful implementation, measurement, and a willingness to explain tradeoffs clearly to collaborators.\n\n"
-        f"I want to be precise about fit. My resume does not document every requirement in the posting, so I would "
-        f"confirm any domain-specific, authorization, clearance, or production-scale expectations directly with the "
-        f"employer. I have not added claims about those areas. The evidence above is the basis for my application, "
-        f"and the remaining questions are appropriate topics for a human review.\n\n"
+        f"{second_requirement}. That combination matches my experience turning data and model work into "
+        f"reproducible software and explaining results clearly. I am seeking a full-time opportunity and would "
+        f"welcome a conversation about how this evidence could support {employer}'s team.\n\n"
+        f"My resume documents three relevant examples. First, {evidence[0]}. Second, {evidence[1]}. "
+        f"Third, {evidence[2]}. Together, these projects and roles show hands-on work with model development, "
+        f"data analysis, deployment, and technical problem solving. I would bring a measurement-first approach: "
+        f"understand the data, evaluate failure cases, make the implementation reproducible, and communicate the "
+        f"tradeoffs to the people using the result. That approach gives collaborators a clear basis for deciding "
+        f"what to improve next, especially when requirements or data quality are still evolving.\n\n"
+        f"I also want to be precise about fit. My resume does not document every domain-specific, authorization, "
+        f"clearance, or production-scale requirement in the posting, so I would confirm those points directly with "
+        f"the employer rather than make assumptions. The evidence above is the basis for my application, and I am "
+        f"prepared to discuss both the work I have done and the areas where I would need to learn the team's context.\n\n"
         f"Thank you for reviewing my application. I would be glad to discuss the role and the evidence behind this "
         f"application pack.\n\nSincerely,\n{clip(candidate_name, 8) or 'Candidate'}"
     )

@@ -511,16 +511,14 @@ def _footer_html(result: RunResult) -> str:
 
 
 def _cv_preview_html(pack) -> str:
-    """Render the tailored CV with each bullet's corpus_ref chip (the grounding IS the feature)."""
+    """Render the tailored CV with a human-readable grounding badge."""
     cv = pack.cv
     parts = [f"<p><b>{escape(cv.headline)}</b></p>", f'<p class="js-job-why">{escape(cv.summary)}</p>']
     for entry in cv.experience:
         dates = f' <span class="js-cvprev-dates">{escape(entry.dates)}</span>' if entry.dates else ""
         parts.append(f'<p class="js-cvprev-role">{escape(entry.role)} — {escape(entry.company)}{dates}</p>')
         if entry.bullets:
-            bullets = "".join(
-                f"<li>{escape(b.text)}<span class='js-ref'>{escape(b.corpus_ref)}</span></li>" for b in entry.bullets
-            )
+            bullets = "".join(f"<li>{escape(b.text)}<span class='js-ref'>✓ verified evidence</span></li>" for b in entry.bullets)
             parts.append(f"<ul>{bullets}</ul>")
     if cv.projects:
         parts.append('<p class="js-section-label">Selected projects</p>')
@@ -529,7 +527,7 @@ def _cv_preview_html(pack) -> str:
             parts.append(f'<p class="js-cvprev-role">{escape(entry.role)} — {escape(entry.company)}{dates}</p>')
             if entry.bullets:
                 bullets = "".join(
-                    f"<li>{escape(b.text)}<span class='js-ref'>{escape(b.corpus_ref)}</span></li>" for b in entry.bullets
+                    f"<li>{escape(b.text)}<span class='js-ref'>✓ verified evidence</span></li>" for b in entry.bullets
                 )
                 parts.append(f"<ul>{bullets}</ul>")
     if cv.skills:

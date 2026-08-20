@@ -8,7 +8,13 @@ import pytest
 
 import job_scout.graph.nodes.tailor as tailor_mod
 from job_scout.corpus import build_corpus
-from job_scout.graph.nodes.tailor import _cv_bullet_count, _cv_word_count, _enforce_cv_contract, tailor
+from job_scout.graph.nodes.tailor import (
+    _cv_bullet_count,
+    _cv_word_count,
+    _enforce_cv_contract,
+    _restore_source_headers,
+    tailor,
+)
 from job_scout.graph.schemas import (
     CandidatePreferences,
     CVContent,
@@ -136,6 +142,40 @@ def test_bullet_requiring_corpus_ref_flows_through(monkeypatch, sample_profile):
     update = tailor(_state(profile=sample_profile))
     bullets = update["tailoring"].cv.experience[0].bullets
     assert bullets[0].corpus_ref == "cv-bullet-002"
+
+
+def test_model_cannot_replace_source_employer_header():
+    corpus = build_corpus(
+        """Jane Doe
+Experience
+Data Engineer, PipeCorp (2022-2026)
+- Built reliable streaming ingestion pipelines handling millions of events daily.
+- Migrated the warehouse from Redshift to BigQuery with tested repeatable workflows.
+"""
+    )
+    pack = TailoringPack(
+        cv=CVContent(
+            headline="Data Engineer",
+            summary="Builds data systems.",
+            experience=[
+                ExperienceEntry(
+                    role="AI Intern",
+                    company="Undisclosed",
+                    dates="2024",
+                    bullets=[TailoredBullet(text="Rewritten evidence", corpus_ref="cv-bullet-002")],
+                )
+            ],
+        ),
+        cover_letter="Draft",
+    )
+
+    restored = _restore_source_headers(pack, corpus)
+
+    # The source fixture's first entry is the only available experience entry;
+    # the model cannot anonymize or rewrite its employer/date metadata.
+    assert restored.cv.experience[0].role == "Data Engineer"
+    assert restored.cv.experience[0].company == "PipeCorp"
+    assert restored.cv.experience[0].dates == "2022-2026"
 
 
 def test_empty_openrouter_structured_envelope_recovers_with_validated_json(monkeypatch, sample_profile):

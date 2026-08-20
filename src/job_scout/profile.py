@@ -193,7 +193,8 @@ def _augment_resume_facts(profile: Profile, cv_text: str) -> Profile:
         )
 
     lowered = text.lower()
-    if "penn state" in lowered and "artificial intelligence" in lowered:
+    has_penn_state = "penn state" in lowered or "pennsylvania state university" in lowered
+    if has_penn_state and "artificial intelligence" in lowered:
         add_entry("Penn State", "M.S.", "Artificial Intelligence", date(2025, 8, 1), date(2026, 12, 1), True)
     if "nyu" in lowered and "computer engineering" in lowered:
         add_entry("NYU", "M.S.", "Computer Engineering", date(2024, 9, 1), date(2025, 8, 1), False)

@@ -200,6 +200,8 @@ class CVContent(BaseModel):
 
     headline: str
     summary: str
+    email: str = ""
+    phone: str = ""
     experience: list[ExperienceEntry] = Field(default_factory=list)
     projects: list[ExperienceEntry] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)

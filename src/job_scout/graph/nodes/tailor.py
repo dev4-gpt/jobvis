@@ -253,6 +253,48 @@ def _resume_links(value: object) -> list[CVLink]:
     return links
 
 
+def _resume_email(links: list[CVLink]) -> str:
+    """Recover the visible email address from the source mailto annotation."""
+    for link in links:
+        if link.url.lower().startswith("mailto:"):
+            return link.url[7:].split("?", 1)[0]
+    return ""
+
+
+def _source_entry_by_refs(entries: list[ExperienceEntry]) -> dict[str, ExperienceEntry]:
+    """Index source entries so model headers can be replaced deterministically."""
+    return {bullet.corpus_ref: entry for entry in entries for bullet in entry.bullets}
+
+
+def _restore_source_headers(pack: TailoringPack, corpus) -> TailoringPack:
+    """Keep employer/project headers from the resume while retaining model emphasis."""
+    cleaned = pack.model_copy(deep=True)
+    source_experience = _source_entries(corpus, project=False)
+    source_projects = _source_entries(corpus, project=True)
+    for generated, source_entries in (
+        (cleaned.cv.experience, source_experience),
+        (cleaned.cv.projects, source_projects),
+    ):
+        by_ref = _source_entry_by_refs(source_entries)
+        for index, entry in enumerate(generated):
+            matches = [by_ref[bullet.corpus_ref] for bullet in entry.bullets if bullet.corpus_ref in by_ref]
+            if not matches:
+                continue
+            source = matches[0]
+            cleaned_entry = entry.model_copy(update={"role": source.role, "company": source.company, "dates": source.dates})
+            generated[index] = cleaned_entry
+    return cleaned
+
+
+def _preserve_cv_metadata(pack: TailoringPack, profile, links: list[CVLink]) -> TailoringPack:
+    """Overlay contact/link metadata after every model response."""
+    cleaned = pack.model_copy(deep=True)
+    cleaned.cv.links = list(links)
+    cleaned.cv.email = _resume_email(links)
+    cleaned.cv.phone = profile.phone or cleaned.cv.phone
+    return cleaned
+
+
 def _letter_has_grounding_flags(pack: TailoringPack, corpus, ranked: RankedJob, research: str | None, preferences) -> bool:
     """Return whether the cover letter still contains unsupported facts."""
     report = validate_pack(
@@ -337,7 +379,7 @@ def _source_entry(section: str, items: list[Any], *, project: bool) -> Experienc
     """Convert one source heading group into a grounded CV entry."""
     source_items = [_normalize_source_text(item.text) for item in items]
     dated = next((text for text in source_items if _DATE_RANGE.search(text)), "")
-    dates = " — ".join(re.findall(r"(?:[A-Z][a-z]+\s+)?(?:19|20)\d{2}[^,;]*", dated))
+    dates = " — ".join(re.findall(r"(?:[A-Z][a-z]+\s+)?(?:19|20)\d{2}[^,;]*", dated)).strip(" ()")
     bullets = [
         TailoredBullet(text=_normalize_source_text(item.text), corpus_ref=item.id)
         for item in items
@@ -356,16 +398,17 @@ def _source_entry(section: str, items: list[Any], *, project: bool) -> Experienc
     company = ""
     if not project:
         role_line = next((text for text in source_items if _DATE_RANGE.search(text)), "")
-        role = (
-            re.sub(
-                r"\s+(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+)?(?:19|20)\d{2}.*$",
-                "",
-                role_line,
-                flags=re.IGNORECASE,
-            ).strip()
-            or role
-        )
-        company = _clean_source_header(section)
+        role_line = re.sub(
+            r"\s*(?:\([^)]*(?:19|20)\d{2}[^)]*\)|(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+)?(?:19|20)\d{2}.*)$",
+            "",
+            role_line,
+            flags=re.IGNORECASE,
+        ).strip(" ,–-")
+        if section.strip().lower() in {"experience", "professional experience", "work experience"} and "," in role_line:
+            role, company = (part.strip() for part in role_line.split(",", 1))
+        else:
+            role = role_line or role
+            company = _clean_source_header(section)
     return ExperienceEntry(role=role, company=company, dates=dates, bullets=bullets)
 
 
@@ -445,6 +488,8 @@ def _source_cv_content(profile, corpus, ranked: RankedJob, links, preferences: C
     return CVContent(
         headline=(profile.primary_roles[0] if profile.primary_roles else ranked.job.title) or "AI/ML professional",
         summary=_source_summary(profile, corpus, ranked, preferences),
+        email=_resume_email(list(links)),
+        phone=profile.phone or "",
         experience=experience,
         projects=projects,
         skills=skills[:35],
@@ -462,8 +507,7 @@ def _enforce_cv_contract(
     preferences: CandidatePreferences,
 ) -> tuple[TailoringPack, bool]:
     """Reject sparse model CVs and restore missing source sections deterministically."""
-    cleaned = pack.model_copy(deep=True)
-    cleaned.cv.links = list(links)
+    cleaned = _preserve_cv_metadata(pack, profile, links)
     dense_enough = (
         _cv_word_count(cleaned) >= _CV_MIN_WORDS
         and _cv_bullet_count(cleaned) >= _CV_MIN_BULLETS
@@ -618,17 +662,19 @@ def tailor(state: AgentState) -> dict:
         pack = _deterministic_pack(profile, corpus, ranked, _resume_links(state.get("cv_links", [])), preferences)
         errors.append("tailor: all configured tailoring providers failed; used a deterministic CV/letter draft for review")
         errors.extend(f"tailor provider: {message}" for message in provider_errors[:3])
-    # Links are source metadata, not LLM content. Re-attach them after every
-    # response so a model can never silently discard a clickable resume link.
-    pack.cv.links = _resume_links(state.get("cv_links", []))
+    # Links and contact fields are source metadata, not LLM content. Re-attach
+    # them after every response so a model can never silently discard them.
+    source_links = _resume_links(state.get("cv_links", []))
+    pack = _preserve_cv_metadata(pack, profile, source_links)
     pack = _clean_unconfirmed_policy_claims(pack, preferences)
     pack = _clean_unsupported_domain_claims(pack, corpus)
+    pack = _restore_source_headers(pack, corpus)
     pack, cv_rebuilt = _enforce_cv_contract(
         pack,
         profile,
         corpus,
         ranked,
-        _resume_links(state.get("cv_links", [])),
+        source_links,
         preferences,
     )
     if cv_rebuilt:
@@ -664,15 +710,16 @@ def tailor(state: AgentState) -> dict:
         except Exception as exc:
             errors.append(f"tailor: quality repair could not be completed — {exc}")
         else:
-            repaired.cv.links = _resume_links(state.get("cv_links", []))
+            repaired = _preserve_cv_metadata(repaired, profile, source_links)
             pack = _clean_unconfirmed_policy_claims(repaired, preferences)
             pack = _clean_unsupported_domain_claims(pack, corpus)
+            pack = _restore_source_headers(pack, corpus)
             pack, cv_rebuilt = _enforce_cv_contract(
                 pack,
                 profile,
                 corpus,
                 ranked,
-                _resume_links(state.get("cv_links", [])),
+                source_links,
                 preferences,
             )
             if cv_rebuilt:
