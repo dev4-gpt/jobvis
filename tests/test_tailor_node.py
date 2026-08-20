@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 import job_scout.graph.nodes.tailor as tailor_mod
 from job_scout.graph.nodes.tailor import tailor
-from job_scout.graph.schemas import CVContent, ExperienceEntry, RankedJob, TailoredBullet, TailoringPack
+from job_scout.graph.schemas import CVContent, CVLink, ExperienceEntry, RankedJob, TailoredBullet, TailoringPack
 from job_scout.llm import LLMBudgetExceededError
 from tests.conftest import make_job, plain_llm, structured_llm
 from tests.test_corpus import SAMPLE_CV
@@ -151,6 +153,44 @@ def test_empty_openrouter_structured_envelope_recovers_with_validated_json(monke
     assert isinstance(update["tailoring"], TailoringPack)
     assert update["llm_calls"] == 6  # typed attempt + recovery + bounded quality repair
     assert not any("no draft was created" in error for error in update["errors"])
+
+
+def test_all_tailoring_providers_failed_still_returns_grounded_pack(monkeypatch, sample_profile):
+    """An empty OpenRouter response must degrade to a reviewable local draft."""
+    import job_scout.graph.nodes.tailor as tailor_module
+
+    failed_model = MagicMock()
+    failed_structured = MagicMock()
+    failed_structured.invoke.side_effect = ValueError(
+        "Structured Output response does not have a 'parsed' field nor a 'refusal' field"
+    )
+    failed_model.with_structured_output.return_value = failed_structured
+    empty_message = MagicMock()
+    empty_message.content = ""
+    failed_model.invoke.return_value = empty_message
+    monkeypatch.setattr(tailor_module, "get_chat_model", lambda *a, **k: failed_model)
+
+    update = tailor(
+        _state(
+            profile=sample_profile,
+            cv_links=[CVLink(label="Portfolio", url="https://portfolio.example", page=1)],
+        )
+    )
+
+    assert isinstance(update["tailoring"], TailoringPack)
+    assert update["tailoring"].cv.links[0].url == "https://portfolio.example"
+    assert 250 <= update["cover_letter_quality"].word_count <= 350
+    assert any("deterministic CV/letter draft" in error for error in update["errors"])
+
+
+def test_unverified_fhir_claim_is_removed_from_generated_pack(monkeypatch, sample_profile):
+    pack = _pack().model_copy(update={"cv": CVContent(headline="AI engineer", summary="Completed self-study FHIR.")})
+    llm = structured_llm(pack)
+    monkeypatch.setattr(tailor_mod, "get_chat_model", lambda *a, **k: llm)
+
+    update = tailor(_state(profile=sample_profile))
+
+    assert "FHIR" not in update["tailoring"].cv.summary
 
 
 def test_legacy_tailoring_json_is_normalized_before_validation():
