@@ -135,6 +135,23 @@ def test_flexible_skill_headings():
     assert corpus.skills() == ["Python", "Kubernetes", "Airflow"]
 
 
+def test_long_skills_heading_and_wrapped_bullets_are_preserved():
+    cv = """\
+Professional Experience
+Example Labs, NY
+Data Scientist January 2024 - July 2024
+- Built a predictive model improving operational efficiency by 3%
+efficiency by 3%.
+
+TECHNICAL SKILLS & SOFTWARES PROFICIENCY
+Python, SQL, PyTorch, Docker, FastAPI.
+"""
+    corpus = build_corpus(cv)
+    assert corpus.skills() == ["Python", "SQL", "PyTorch", "Docker", "FastAPI"]
+    bullets = [item.text for item in corpus.items if item.kind == "bullet"]
+    assert any("efficiency by 3%" in bullet for bullet in bullets)
+
+
 def test_pipe_rows_keep_content_but_drop_contacts():
     cv = """\
 Experience

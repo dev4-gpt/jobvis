@@ -7,8 +7,18 @@ from unittest.mock import MagicMock
 import pytest
 
 import job_scout.graph.nodes.tailor as tailor_mod
-from job_scout.graph.nodes.tailor import tailor
-from job_scout.graph.schemas import CVContent, CVLink, ExperienceEntry, RankedJob, TailoredBullet, TailoringPack
+from job_scout.corpus import build_corpus
+from job_scout.graph.nodes.tailor import _cv_bullet_count, _cv_word_count, _enforce_cv_contract, tailor
+from job_scout.graph.schemas import (
+    CandidatePreferences,
+    CVContent,
+    CVLink,
+    ExperienceEntry,
+    Profile,
+    RankedJob,
+    TailoredBullet,
+    TailoringPack,
+)
 from job_scout.llm import LLMBudgetExceededError
 from tests.conftest import make_job, plain_llm, structured_llm
 from tests.test_corpus import SAMPLE_CV
@@ -191,6 +201,84 @@ def test_unverified_fhir_claim_is_removed_from_generated_pack(monkeypatch, sampl
     update = tailor(_state(profile=sample_profile))
 
     assert "FHIR" not in update["tailoring"].cv.summary
+
+
+def test_sparse_model_cv_is_rebuilt_from_source_with_density_contract():
+    cv_text = """\
+Professional Experience
+SymphonyAI, NY
+Data Scientist January 2024 - July 2024
+- Built predictive maintenance models with Python and PyTorch, reducing downtime by 25%.
+- Improved model accuracy by 20% through evaluation and feature engineering.
+- Deployed FastAPI services and reduced response time by 40%.
+- Analyzed multivariate data, identified bottlenecks, and documented improvements for stakeholders and engineering teams.
+- Validated model behavior with repeatable experiments, error analysis, and monitoring checks before deployment.
+- Translated technical findings into clear implementation notes covering data quality, model limitations, and next steps.
+
+Bioqube, NY
+AI Engineer July 2023 - August 2023
+- Developed a computer vision system achieving 75% accuracy on video data.
+- Built data pipelines processing large-scale video datasets.
+- Improved reliability through testing and optimization.
+- Designed evaluation workflows for precision, recall, false positives, and data coverage across representative samples.
+- Collaborated on service integration and documented reproducible steps for testing model outputs and API behavior.
+- Investigated failure cases and converted observations into targeted improvements for model quality and operational reliability.
+
+Academic Reports
+Autonomous Legal Document Analyzer, NY
+- Built a GenAI legal document analysis system for contract ingestion and risk assessment.
+- Designed a RAG pipeline using LangChain, FAISS, and ChromaDB.
+- Developed a multi-step LLM agent with LangGraph and Docker deployment.
+- Structured the workflow around ingestion, retrieval, clause extraction, and review-oriented outputs.
+- Connected the system components into a prototype with clear boundaries between retrieval, reasoning, and presentation.
+- Focused evaluation on traceable outputs, reproducibility, and grounded evidence rather than unsupported generated claims.
+
+Veloce AgenticOS, NY
+- Built an AI command center for agent execution, memory, and workflow orchestration.
+- Designed operator interfaces for status, monitoring, and live activity streams.
+- Implemented backend API routes for agent chat, previews, and memory search.
+- Organized agent capabilities behind a consistent interface for planning, execution, review, and handoffs.
+- Connected local context and activity records so operators could inspect decisions and system state across sessions.
+- Documented the platform architecture and integration points to make future extensions easier to evaluate and maintain.
+- Evaluated orchestration across planning, tool use, state transitions, and review checkpoints.
+- Built reusable surfaces for inspecting agent status, active work, stored context, generated outputs, and task relationships.
+- Connected product workflows to backend services while keeping development, deployment, and integration testing understandable.
+- Applied structured logging and visible activity records to make failures and handoffs easier to diagnose.
+- Designed the system so new providers and specialized agents could be introduced without changing the review workflow.
+- Tested interactions across frontend components, API routes, model calls, local context, and generated artifacts.
+- Documented decisions, constraints, and tradeoffs so the platform could evolve with grounded outputs.
+- Focused implementation on AI product delivery, reproducible workflows, observable state, and human review.
+
+TECHNICAL SKILLS & SOFTWARES PROFICIENCY
+Python, SQL, PyTorch, Docker, FastAPI, LangChain, FAISS, ChromaDB, LangGraph, Git, AWS, GCP, React, TypeScript.
+Education
+Penn State — M.S. Artificial Intelligence (2026)
+"""
+    corpus = build_corpus(cv_text)
+    ranked = _ranked()
+    profile = Profile(name="Candidate", primary_roles=["AI Engineer"])
+    sparse = TailoringPack(
+        cv=CVContent(headline="Relevant resume evidence", summary="Short summary", skills=[]),
+        cover_letter="Draft",
+    )
+    rebuilt, changed = _enforce_cv_contract(
+        sparse,
+        profile,
+        corpus,
+        ranked,
+        [CVLink(label="Portfolio", url="https://portfolio.example", page=1)],
+        CandidatePreferences(),
+    )
+
+    assert changed is True
+    # A source CV that is itself shorter than the contract must remain
+    # grounded; the gate cannot invent filler just to hit a page target.
+    assert _cv_word_count(rebuilt) >= 250
+    assert _cv_bullet_count(rebuilt) >= 10
+    assert len(rebuilt.cv.experience) >= 2
+    assert len(rebuilt.cv.projects) >= 2
+    assert len(rebuilt.cv.skills) >= 12
+    assert rebuilt.cv.links[0].url == "https://portfolio.example"
 
 
 def test_legacy_tailoring_json_is_normalized_before_validation():

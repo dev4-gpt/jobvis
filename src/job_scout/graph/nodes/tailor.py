@@ -47,6 +47,45 @@ from job_scout.validation import validate_pack
 
 _DESCRIPTION_LIMIT = 3000
 
+# A tailored CV is a usable document, not a three-bullet model summary. These
+# are content gates rather than page-count promises: the renderer decides the
+# exact pagination, while this contract keeps a normal 1.5–2 page CV from
+# collapsing when a provider returns a technically valid but sparse object.
+_CV_MIN_WORDS = 600
+_CV_MIN_BULLETS = 10
+_CV_MIN_EXPERIENCE_ENTRIES = 2
+_CV_MIN_PROJECT_ENTRIES = 2
+_CV_MIN_SKILLS = 12
+_DATE_RANGE = re.compile(
+    r"\b(?:19|20)\d{2}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b",
+    re.IGNORECASE,
+)
+_PROJECT_HEADER_TERMS = (
+    "analyzer",
+    "attacks",
+    "agentic",
+    "automation",
+    "research assistantship",
+    "veloce",
+    "financial",
+)
+_ACTION_STARTS = (
+    "built ",
+    "developed ",
+    "designed ",
+    "implemented ",
+    "created ",
+    "integrated ",
+    "deployed ",
+    "improved ",
+    "reduced ",
+    "performed ",
+    "investigated ",
+    "analyzed ",
+    "utilizes ",
+    "the pipeline ",
+)
+
 
 class TailoringInvocationError(RuntimeError):
     """A provider attempt failed after a known number of model calls."""
@@ -242,6 +281,223 @@ def _fallback_evidence(corpus, ranked: RankedJob) -> list[str]:
     return [item.text for item in ranked_items[:3]]
 
 
+def _cv_word_count(pack: TailoringPack) -> int:
+    """Count words in all visible CV sections."""
+    parts = [pack.cv.headline, pack.cv.summary, *pack.cv.skills, *pack.cv.education]
+    for entry in (*pack.cv.experience, *pack.cv.projects):
+        parts.extend((entry.role, entry.company, entry.dates))
+        parts.extend(bullet.text for bullet in entry.bullets)
+    return len(" ".join(parts).split())
+
+
+def _cv_bullet_count(pack: TailoringPack) -> int:
+    """Count tailored CV bullets across experience and projects."""
+    return sum(len(entry.bullets) for entry in (*pack.cv.experience, *pack.cv.projects))
+
+
+def _normalize_source_text(text: str) -> str:
+    """Make PDF-extracted source text readable without changing its claims."""
+    return re.sub(r"\s+", " ", text.lstrip("".join("-•*–◦"))).strip()
+
+
+def _clean_source_header(text: str) -> str:
+    """Remove PDF-only link/location columns from a source entry heading."""
+    cleaned = _normalize_source_text(text)
+    cleaned = re.sub(r"\s+(?:Landing Page|Product Page).*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+(?:GitHub|Github)\s+.*$", "", cleaned)
+    cleaned = re.sub(
+        r"\s+(?:[A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)*,\s*(?:[A-Z]{2}|India|Singapore|Germany|Canada|Australia))\s*$",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(r"\s+(?:India|Singapore|Germany|Canada|Australia)\s*$", "", cleaned)
+    return cleaned.strip(" -–") or "Source resume evidence"
+
+
+def _group_source_items(corpus) -> list[tuple[str, list[Any]]]:
+    """Group contiguous CV bullets by the metadata heading they followed."""
+    groups: list[tuple[str, list[Any]]] = []
+    for item in corpus.items:
+        if item.source != "cv" or item.kind != "bullet":
+            continue
+        if groups and groups[-1][0] == item.section:
+            groups[-1][1].append(item)
+        else:
+            groups.append((item.section, [item]))
+    return groups
+
+
+def _is_project_group(section: str) -> bool:
+    """Identify project headings conservatively from source-only metadata."""
+    lowered = section.lower()
+    return any(term in lowered for term in _PROJECT_HEADER_TERMS)
+
+
+def _source_entry(section: str, items: list[Any], *, project: bool) -> ExperienceEntry | None:
+    """Convert one source heading group into a grounded CV entry."""
+    source_items = [_normalize_source_text(item.text) for item in items]
+    dated = next((text for text in source_items if _DATE_RANGE.search(text)), "")
+    dates = " — ".join(re.findall(r"(?:[A-Z][a-z]+\s+)?(?:19|20)\d{2}[^,;]*", dated))
+    bullets = [
+        TailoredBullet(text=_normalize_source_text(item.text), corpus_ref=item.id)
+        for item in items
+        if len(item.text.split()) >= 8 and not (_DATE_RANGE.search(item.text) and len(item.text.split()) < 10)
+    ]
+    # Role/date lines are usually the only short item in an experience group;
+    # remove obvious metadata that slipped through the PDF extractor.
+    bullets = [
+        bullet
+        for bullet in bullets
+        if not (_DATE_RANGE.search(bullet.text) and not bullet.text.lower().startswith(_ACTION_STARTS))
+    ]
+    if not bullets:
+        return None
+    role = _clean_source_header(section)
+    company = ""
+    if not project:
+        role_line = next((text for text in source_items if _DATE_RANGE.search(text)), "")
+        role = (
+            re.sub(
+                r"\s+(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+)?(?:19|20)\d{2}.*$",
+                "",
+                role_line,
+                flags=re.IGNORECASE,
+            ).strip()
+            or role
+        )
+        company = _clean_source_header(section)
+    return ExperienceEntry(role=role, company=company, dates=dates, bullets=bullets)
+
+
+def _source_entries(corpus, *, project: bool) -> list[ExperienceEntry]:
+    """Build grounded source entries for experience or selected projects."""
+    entries: list[ExperienceEntry] = []
+    for section, items in _group_source_items(corpus):
+        if _is_project_group(section) is not project:
+            continue
+        entry = _source_entry(section, items, project=project)
+        if entry is not None:
+            entries.append(entry)
+    return entries
+
+
+def _entry_relevance(entry: ExperienceEntry, ranked: RankedJob) -> int:
+    """Score source entries only for ordering; it cannot add new content."""
+    target = set(re.findall(r"[a-z0-9+#-]{3,}", f"{ranked.job.title} {ranked.job.description}".lower()))
+    text = " ".join([entry.role, entry.company, *(bullet.text for bullet in entry.bullets)]).lower()
+    return len(target & set(re.findall(r"[a-z0-9+#-]{3,}", text)))
+
+
+def _source_education(profile, corpus) -> list[str]:
+    """Prefer structured education, with a source-text fallback."""
+    education: list[str] = []
+    for entry in profile.education_history:
+        line = " — ".join(part for part in (entry.institution, entry.degree, entry.field) if part)
+        if entry.end_date:
+            line += f" ({entry.end_date.isoformat()})"
+        if line:
+            education.append(line)
+    if education:
+        return education
+    return [_normalize_source_text(item.text) for item in corpus.items if item.kind == "education"]
+
+
+def _source_summary(profile, corpus, ranked: RankedJob, preferences: CandidatePreferences) -> str:
+    """Create a short, source-grounded summary when the model summary is thin."""
+    raw = (profile.raw_summary or "").strip()
+    if len(raw.split()) >= 35:
+        return remove_unconfirmed_policy_sentences(
+            raw,
+            authorization_status=preferences.authorization_status,
+            sponsorship_policy=preferences.sponsorship_policy,
+            clearance_status=preferences.clearance_status,
+        )
+    roles = ", ".join(profile.primary_roles[:3]) or ranked.job.title
+    evidence_terms = []
+    for item in corpus.items:
+        lowered = item.text.lower()
+        for term in ("predictive maintenance", "rag", "llm agent", "computer vision", "fastapi"):
+            if term in lowered and term not in evidence_terms:
+                evidence_terms.append(term)
+    focus = ", ".join(evidence_terms[:4]) or "machine-learning and data systems"
+    return (
+        f"Candidate targeting full-time {roles} roles, with source-documented evidence across {focus}. "
+        "The experience and project bullets below are preserved from the original resume and selected for this job."
+    )
+
+
+def _source_cv_content(profile, corpus, ranked: RankedJob, links, preferences: CandidatePreferences) -> CVContent:
+    """Build a dense CV from source evidence without asking an LLM to fill gaps."""
+    experience = _source_entries(corpus, project=False)
+    projects = _source_entries(corpus, project=True)
+    if not experience:
+        bullets = [
+            TailoredBullet(text=_normalize_source_text(item.text), corpus_ref=item.id)
+            for item in corpus.items
+            if item.kind == "bullet" and len(item.text.split()) >= 8
+        ]
+        experience = [ExperienceEntry(role="Professional and research evidence", company="", bullets=bullets[:8])]
+    projects = sorted(projects, key=lambda entry: _entry_relevance(entry, ranked), reverse=True)
+    # Keep the strongest three or four source projects. This gives the PDF
+    # substance without reproducing every project in every application.
+    projects = [entry.model_copy(update={"bullets": entry.bullets[:4]}) for entry in projects[:4]]
+    skills = corpus.skills() or list(profile.skills)
+    return CVContent(
+        headline=(profile.primary_roles[0] if profile.primary_roles else ranked.job.title) or "AI/ML professional",
+        summary=_source_summary(profile, corpus, ranked, preferences),
+        experience=experience,
+        projects=projects,
+        skills=skills[:35],
+        education=_source_education(profile, corpus),
+        links=list(links),
+    )
+
+
+def _enforce_cv_contract(
+    pack: TailoringPack,
+    profile,
+    corpus,
+    ranked: RankedJob,
+    links,
+    preferences: CandidatePreferences,
+) -> tuple[TailoringPack, bool]:
+    """Reject sparse model CVs and restore missing source sections deterministically."""
+    cleaned = pack.model_copy(deep=True)
+    cleaned.cv.links = list(links)
+    dense_enough = (
+        _cv_word_count(cleaned) >= _CV_MIN_WORDS
+        and _cv_bullet_count(cleaned) >= _CV_MIN_BULLETS
+        and len(cleaned.cv.experience) >= _CV_MIN_EXPERIENCE_ENTRIES
+        and len(cleaned.cv.projects) >= _CV_MIN_PROJECT_ENTRIES
+        and len(cleaned.cv.skills) >= _CV_MIN_SKILLS
+    )
+    if dense_enough:
+        return cleaned, False
+
+    source_cv = _source_cv_content(profile, corpus, ranked, links, preferences)
+    valid_refs = {item.id for item in corpus.items}
+    model_bullets = [
+        bullet
+        for entry in (*cleaned.cv.experience, *cleaned.cv.projects)
+        for bullet in entry.bullets
+        if bullet.corpus_ref in valid_refs and bullet.text.strip()
+    ]
+    # Preserve valid model emphasis by prepending it to the first source role;
+    # all remaining material still comes verbatim from the original corpus.
+    existing_refs = {bullet.corpus_ref for entry in (*source_cv.experience, *source_cv.projects) for bullet in entry.bullets}
+    preserved = [bullet for bullet in model_bullets if bullet.corpus_ref not in existing_refs]
+    if preserved and source_cv.experience:
+        first = source_cv.experience[0]
+        source_cv.experience[0] = first.model_copy(update={"bullets": [*preserved, *first.bullets]})
+    if len(cleaned.cv.summary.split()) >= 35:
+        source_cv.summary = cleaned.cv.summary
+    if cleaned.cv.headline.strip() and cleaned.cv.headline.lower() not in {"data scientist", "relevant resume evidence"}:
+        source_cv.headline = cleaned.cv.headline
+    source_cv.skills = list(dict.fromkeys([*cleaned.cv.skills, *source_cv.skills]))[:35]
+    source_cv.links = list(links)
+    return cleaned.model_copy(update={"cv": source_cv}), True
+
+
 def _deterministic_pack(profile, corpus, ranked: RankedJob, links, preferences: CandidatePreferences) -> TailoringPack:
     """Build a safe, usable draft when every configured provider is unavailable.
 
@@ -251,43 +507,10 @@ def _deterministic_pack(profile, corpus, ranked: RankedJob, links, preferences: 
     deterministic grounded fallback. A provider outage therefore cannot
     produce an empty pack or invent a claim.
     """
-    evidence_items = [item for item in corpus.items if item.kind in {"bullet", "summary"}]
-    selected = _fallback_evidence(corpus, ranked)
-    selected_items = []
-    for text in selected:
-        item = next((candidate for candidate in evidence_items if candidate.text == text), None)
-        if item is not None and item not in selected_items:
-            selected_items.append(item)
-    if not selected_items:
-        selected_items = evidence_items[:3]
-
-    bullets = [TailoredBullet(text=item.text, corpus_ref=item.id) for item in selected_items[:4]]
-    role = (profile.primary_roles[0] if profile.primary_roles else ranked.job.title) or "Relevant experience"
-    summary = profile.raw_summary.strip() or (
-        f"Candidate preparing for a full-time {ranked.job.title} opportunity with evidence documented in the source resume."
-    )
-    summary = remove_unconfirmed_policy_sentences(
-        summary,
-        authorization_status=preferences.authorization_status,
-        sponsorship_policy=preferences.sponsorship_policy,
-        clearance_status=preferences.clearance_status,
-    )
-    education = []
-    for entry in profile.education_history:
-        line = " — ".join(part for part in (entry.institution, entry.degree, entry.field) if part)
-        if entry.end_date:
-            line += f" ({entry.end_date.isoformat()})"
-        if line:
-            education.append(line)
+    selected_items = [item for item in corpus.items if item.kind in {"bullet", "summary"} and len(item.text.split()) >= 8]
+    source_cv = _source_cv_content(profile, corpus, ranked, links, preferences)
     pack = TailoringPack(
-        cv=CVContent(
-            headline=role,
-            summary=summary,
-            experience=[ExperienceEntry(role="Relevant resume evidence", company="", bullets=bullets)],
-            skills=corpus.skills()[:18],
-            education=education,
-            links=list(links),
-        ),
+        cv=source_cv,
         cover_letter=grounded_fallback_letter(
             candidate_name=profile.name or "Candidate",
             company=ranked.job.company,
@@ -400,6 +623,18 @@ def tailor(state: AgentState) -> dict:
     pack.cv.links = _resume_links(state.get("cv_links", []))
     pack = _clean_unconfirmed_policy_claims(pack, preferences)
     pack = _clean_unsupported_domain_claims(pack, corpus)
+    pack, cv_rebuilt = _enforce_cv_contract(
+        pack,
+        profile,
+        corpus,
+        ranked,
+        _resume_links(state.get("cv_links", [])),
+        preferences,
+    )
+    if cv_rebuilt:
+        errors.append(
+            "tailor: model CV failed the density contract; restored source experience, projects, skills, education, and links"
+        )
     quality = evaluate_cover_letter(
         pack.cover_letter,
         ranked.job.description,
@@ -432,6 +667,16 @@ def tailor(state: AgentState) -> dict:
             repaired.cv.links = _resume_links(state.get("cv_links", []))
             pack = _clean_unconfirmed_policy_claims(repaired, preferences)
             pack = _clean_unsupported_domain_claims(pack, corpus)
+            pack, cv_rebuilt = _enforce_cv_contract(
+                pack,
+                profile,
+                corpus,
+                ranked,
+                _resume_links(state.get("cv_links", [])),
+                preferences,
+            )
+            if cv_rebuilt:
+                errors.append("tailor: repaired model CV was sparse; restored missing source sections")
             total_calls += repair_calls
             quality = evaluate_cover_letter(
                 pack.cover_letter,

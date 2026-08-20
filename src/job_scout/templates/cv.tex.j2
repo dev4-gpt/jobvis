@@ -1,4 +1,4 @@
-<# The single ATS-friendly CV template: one page, article class, standard
+<# The ATS-friendly CV template: approximately 1.5–2 pages, article class, standard
    fonts, no images/tables/columns. Every user-derived value goes through the
    |tex escape filter. Swapping this template is a "make it yours" exercise. #>
 \documentclass[10pt]{article}
@@ -36,16 +36,14 @@
 \sectionrule{Experience}
 <% for entry in cv.experience %>
 \Needspace{5\baselineskip}
-\begin{samepage}
 {\bfseries << entry.role | tex >>} --- << entry.company | tex >><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
 <% if entry.bullets %>
 \begin{itemize}
 <% for bullet in entry.bullets %>
-  \item << bullet.text | tex >>
+  \item << bullet.text | ats >>
 <% endfor %>
 \end{itemize}
 <% endif %>
-\end{samepage}
 <% endfor %>
 <% endif %>
 
@@ -53,16 +51,14 @@
 \sectionrule{Selected Projects}
 <% for entry in cv.projects %>
 \Needspace{5\baselineskip}
-\begin{samepage}
 {\bfseries << entry.role | tex >>}<% if entry.company %> --- << entry.company | tex >><% endif %><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
 <% if entry.bullets %>
 \begin{itemize}
 <% for bullet in entry.bullets %>
-  \item << bullet.text | tex >>
+  \item << bullet.text | ats >>
 <% endfor %>
 \end{itemize}
 <% endif %>
-\end{samepage}
 <% endfor %>
 <% endif %>
 

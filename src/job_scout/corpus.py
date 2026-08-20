@@ -44,6 +44,8 @@ _BULLET_GLYPHS = ("-", "•", "*", "–", "◦")
 _TERMINAL_PUNCT = (".", "!", "?", ":", ";")
 _PHONEISH = re.compile(r"\+?\d[\d\s().\-/]{6,}")
 _PIPES = re.compile(r"\s*\|\s*")
+_LOCATIONISH = re.compile(r",\s*(?:[A-Z]{2}|India|Singapore|Germany|Canada|Australia|United Kingdom)\s*$")
+_COUNTRYISH = re.compile(r"\b(?:India|Singapore|Germany|Canada|Australia)\s*$")
 
 # LinkedIn export files we understand. Official exports vary by account and
 # region; every file is optional and anything missing is silently skipped.
@@ -100,7 +102,32 @@ def build_corpus(cv_text: str, linkedin_zip: str | Path | None = None) -> Candid
 def _looks_like_heading(line: str) -> bool:
     """A short standalone word-or-two line reads as a section heading."""
     words = line.split()
-    return 0 < len(words) <= 3 and not line.startswith(_BULLET_GLYPHS) and "," not in line and not line.rstrip().endswith(".")
+    normalized = line.lower().strip(" :")
+    extended_heading = normalized.startswith(("technical skills", "professional experience", "academic reports"))
+    metadata_heading = bool(_LOCATIONISH.search(line) or _COUNTRYISH.search(line.rstrip())) and not line.startswith(
+        _BULLET_GLYPHS
+    )
+    # PDF extraction often leaves a wrapped continuation such as ``efficiency
+    # by 3%`` or ``time-series data`` on its own line.  Treating every short
+    # line as a heading loses the preceding bullet and corrupts provenance.
+    # Real section headings in the supported CV formats are title-cased,
+    # uppercase, or one of the known lowercase aliases.
+    heading_case = (
+        line[:1].isupper()
+        or line.isupper()
+        or normalized
+        in {
+            *{value for value in _SUMMARY_HEADINGS},
+            *{value for value in _SKILL_HEADINGS},
+            *{value for value in _EDUCATION_HEADINGS},
+        }
+    )
+    return (
+        ((0 < len(words) <= 3 and heading_case) or extended_heading or metadata_heading)
+        and not line.startswith(_BULLET_GLYPHS)
+        and (metadata_heading or "," not in line)
+        and not line.rstrip().endswith(".")
+    )
 
 
 def _section_kind(heading: str) -> CorpusKind:
@@ -136,7 +163,7 @@ def _logical_lines(cv_text: str) -> list[str]:
             and not prev.endswith(_TERMINAL_PUNCT)
             and not line.startswith(_BULLET_GLYPHS)
             and not _looks_like_heading(line)
-            and (prev.endswith(",") or line[:1].islower())
+            and (prev.endswith(",") or line[:1].islower() or prev.startswith(_BULLET_GLYPHS))
         ):
             lines[-1] = f"{prev} {line}"
         else:

@@ -78,7 +78,8 @@ def test_render_tex_is_a_complete_document():
     assert tex.strip().startswith(r"\documentclass")
     assert tex.strip().endswith(r"\end{document}")
     assert r"\begin{itemize}" in tex
-    assert r"\begin{samepage}" in tex
+    assert r"\Needspace{5\baselineskip}" in tex
+    assert r"\begin{samepage}" not in tex
 
 
 def test_render_tex_includes_selected_projects_and_clickable_links():
