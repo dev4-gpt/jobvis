@@ -7,11 +7,13 @@ from unittest.mock import MagicMock
 import pytest
 
 import job_scout.graph.nodes.tailor as tailor_mod
-from job_scout.corpus import build_corpus
+from job_scout.corpus import CandidateCorpus, CorpusItem, build_corpus
 from job_scout.graph.nodes.tailor import (
+    _clean_cv_summary,
     _cv_bullet_count,
     _cv_word_count,
     _enforce_cv_contract,
+    _fallback_evidence,
     _restore_source_headers,
     tailor,
 )
@@ -82,6 +84,7 @@ def test_unknown_job_id_errors_without_llm_call(monkeypatch, sample_profile):
 
     assert update["tailoring"] is None
     assert any("'nope'" in e for e in update["errors"])
+    assert update["tailor_issue_codes"] == []
     llm.with_structured_output().invoke.assert_not_called()
 
 
@@ -100,6 +103,7 @@ def test_blocked_job_is_rejected_before_corpus_or_llm_work(monkeypatch, sample_p
 
     assert update["tailoring"] is None
     assert any("selected job is blocked" in error for error in update["errors"])
+    assert update["tailor_issue_codes"] == []
     llm.with_structured_output().invoke.assert_not_called()
 
 
@@ -111,6 +115,7 @@ def test_virgin_thread_errors_without_llm_call(monkeypatch):
 
     assert update["tailoring"] is None
     assert any("run a job search first" in e for e in update["errors"])
+    assert update["tailor_issue_codes"] == []
     llm.with_structured_output().invoke.assert_not_called()
 
 
@@ -122,6 +127,7 @@ def test_empty_cv_text_errors_gracefully(monkeypatch, sample_profile):
 
     assert update["tailoring"] is None
     assert any("empty candidate corpus" in e for e in update["errors"])
+    assert update["tailor_issue_codes"] == []
 
 
 def test_bad_linkedin_zip_degrades_to_cv_only(monkeypatch, sample_profile, tmp_path):
@@ -248,6 +254,7 @@ def test_all_tailoring_providers_failed_still_returns_grounded_pack(monkeypatch,
     assert isinstance(update["tailoring"], TailoringPack)
     assert update["tailoring"].cv.links[0].url == "https://portfolio.example"
     assert 250 <= update["cover_letter_quality"].word_count <= 350
+    assert update["tailor_backtest_score"] is not None
     assert any("deterministic CV/letter draft" in error for error in update["errors"])
 
 
@@ -379,3 +386,53 @@ def test_semantic_link_page_labels_are_safe_placeholders():
     )
 
     assert pack.cv.links[0].page == 1
+
+
+def test_internal_provider_summary_is_replaced_with_employer_facing_summary(sample_profile):
+    pack = TailoringPack(
+        cv=CVContent(
+            headline="Data Scientist",
+            summary="Candidate targeting full-time roles, with source-documented evidence selected for this job.",
+        ),
+        cover_letter="Draft",
+    )
+    cleaned = _clean_cv_summary(pack, sample_profile, build_corpus(SAMPLE_CV), _ranked(), CandidatePreferences())
+    assert "Candidate targeting" not in cleaned.cv.summary
+    assert "source-documented" not in cleaned.cv.summary
+    assert "full-time" in cleaned.cv.summary
+
+
+def test_fallback_evidence_excludes_unrelated_finance_and_creative_items():
+    corpus = CandidateCorpus(
+        items=[
+            CorpusItem(
+                id="exp-1",
+                text="Built predictive maintenance models with TensorFlow and reduced downtime by 25%.",
+                kind="bullet",
+                source="cv",
+                section="Data Scientist",
+            ),
+            CorpusItem(
+                id="creative-1",
+                text="Built creative agents for video, music, thumbnails, and image generation.",
+                kind="bullet",
+                source="cv",
+                section="AI Platform",
+            ),
+            CorpusItem(
+                id="finance-1",
+                text="Built financial data ingestion and transaction classification workflows.",
+                kind="bullet",
+                source="cv",
+                section="Financial Automation",
+            ),
+        ]
+    )
+    ranked = RankedJob(
+        job=make_job("j1", "Data Scientist", "MANTECH"),
+        fit_score=80,
+        fit_explanation="",
+    )
+    evidence = _fallback_evidence(corpus, ranked)
+    assert any("predictive maintenance" in item.lower() for item in evidence)
+    assert not any("financial" in item.lower() or "creative agents" in item.lower() for item in evidence)

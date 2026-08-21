@@ -44,3 +44,14 @@ The improvement loop is deliberately bounded and non-regressing. A better
 letter cannot compensate for a lost resume link or an unsupported claim, since
 grounding and policy safety carry the highest weights and all dimensions must
 pass before the pack is considered ready.
+
+For a real local search→tailor→render→audit smoke test, use the explicit
+provider-backed command:
+
+```bash
+make pack-e2e CV=/Users/aryamandev/Downloads/Aryaman_resume.pdf YES=1
+```
+
+This is intentionally opt-in. It uses the configured providers and sources,
+does not add personal material to CI or evaluation datasets, and never submits
+an application.

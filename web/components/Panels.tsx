@@ -9,9 +9,17 @@
  * so it lives in the UI.
  */
 
-import { coverLetterUrl, packUrl, type State } from "@/lib/api";
+import {
+  auditPack,
+  coverLetterUrl,
+  generateOutreach,
+  packUrl,
+  type OutreachDraft,
+  type PackAudit,
+  type State,
+} from "@/lib/api";
 import type { OrbMode } from "@/lib/orbScene";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export type Step = { now: string; next: string; cue?: string };
 
@@ -92,9 +100,11 @@ export function JobsPanel({ state, onOpenApplication }: { state: State; onOpenAp
       </span>
       <span className="score">{job.fit_score}</span>
       {allowOpen && job.url && (
-        <button type="button" className="mini-action" onClick={() => onOpenApplication(job.job_id)}>
-          Open application
-        </button>
+        <span className="job-actions no-drag">
+          <a className="mini-action" href={job.listing_url || job.url} target="_blank" rel="noreferrer">Listing</a>
+          <a className="mini-action" href={job.application_url || job.url} target="_blank" rel="noreferrer">Apply</a>
+          <button type="button" className="mini-action" onClick={() => onOpenApplication(job.job_id)}>Inspect</button>
+        </span>
       )}
     </div>
   );
@@ -123,7 +133,60 @@ export function JobsPanel({ state, onOpenApplication }: { state: State; onOpenAp
 
 export function PackPanel({ state }: { state: State }) {
   const pack = state.pack;
+  const [draft, setDraft] = useState<OutreachDraft | null>(null);
+  const [audit, setAudit] = useState<PackAudit | null>(null);
+  const [outreachError, setOutreachError] = useState("");
+  const [auditError, setAuditError] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [auditing, setAuditing] = useState(false);
+  const hasPack = Boolean(pack);
+
+  useEffect(() => {
+    if (!hasPack) return;
+    let active = true;
+    auditPack()
+      .then((result) => {
+        if (active) setAudit(result);
+      })
+      .catch((caught) => {
+        if (active) setAuditError(caught instanceof Error ? caught.message : String(caught));
+      })
+      .finally(() => {
+        if (active) setAuditing(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasPack, pack?.job_id, pack?.cover_letter, pack?.flags]);
+
   if (!pack) return null;
+
+  async function runAudit() {
+    setAuditing(true);
+    setAuditError("");
+    try {
+      setAudit(await auditPack());
+    } catch (caught) {
+      setAuditError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setAuditing(false);
+    }
+  }
+
+  async function createOutreachDraft() {
+    const jobId = pack?.job_id;
+    if (!jobId) return;
+    setGenerating(true);
+    setOutreachError("");
+    try {
+      setDraft(await generateOutreach(jobId));
+    } catch (caught) {
+      setOutreachError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   return (
     <section className="block">
       <p className="label">Application</p>
@@ -144,7 +207,41 @@ export function PackPanel({ state }: { state: State }) {
         <a className="pill" href={coverLetterUrl("tex")} download>
           Letter .tex
         </a>
+        <button type="button" className="pill" onClick={runAudit} disabled={auditing}>
+          {auditing ? "Checking…" : "Audit pack"}
+        </button>
+        {pack.job_id && (
+          <button type="button" className="pill" onClick={createOutreachDraft} disabled={generating}>
+            {generating ? "Drafting…" : "Why me · email/video"}
+          </button>
+        )}
       </div>
+      {outreachError && <p className="meta warning">{outreachError}</p>}
+      {auditError && <p className="meta warning">{auditError}</p>}
+      {audit && (
+        <details className="pack-audit no-drag" open={!audit.passed}>
+          <summary>{audit.passed ? "✓ Artifact audit passed" : "⚠ Artifact audit failed"}</summary>
+          <p className="meta">
+            CV: {audit.cv_pages} pages · {audit.cv_words} words · links {audit.generated_links}/{audit.source_links} · letter {audit.cover_letter_words} words
+          </p>
+          {audit.issues.map((issue) => (
+            <p className={issue.severity === "blocker" ? "meta warning" : "meta"} key={`${issue.code}-${issue.message}`}>
+              {issue.severity}: {issue.message}
+            </p>
+          ))}
+        </details>
+      )}
+      {draft && (
+        <details className="outreach no-drag">
+          <summary>Manual outreach draft</summary>
+          <p className="meta">Subject: {draft.subject}</p>
+          <p className="label">Email</p>
+          <pre className="draft-text">{draft.email_body}</pre>
+          <p className="label">Video script</p>
+          <pre className="draft-text">{draft.video_script}</pre>
+          <p className="meta warning">Verify the contact and personalize before sending. Jobvis never sends outreach.</p>
+        </details>
+      )}
     </section>
   );
 }

@@ -20,7 +20,7 @@ from job_scout.cover_letter_quality import (
     remove_unconfirmed_policy_sentences,
 )
 from job_scout.graph.schemas import CVContent, CVLink, JobPosting, RankedJob
-from job_scout.renderer import render_pdf
+from job_scout.renderer import render_pdf, render_tex
 from job_scout.tools.cv_reader import extract_cv_document
 
 
@@ -63,11 +63,77 @@ def test_generated_cv_preserves_clickable_links(tmp_path):
     assert {"https://portfolio.example/", "mailto:person@example.com"} <= urls
 
 
+def test_generated_cv_makes_clickable_links_visible():
+    cv = CVContent(
+        headline="Data Engineer",
+        summary="Builds grounded data systems.",
+        links=[CVLink(label="Portfolio", url="https://portfolio.example/", page=1)],
+    )
+    tex = render_tex(cv, "Person")
+    assert "hidelinks" in tex
+    assert r"\href{https://portfolio.example/}{\underline{Portfolio}}" in tex
+
+
+def test_generated_cv_separates_contact_and_link_sections():
+    cv = CVContent(
+        headline="Data Engineer",
+        summary="Builds grounded data systems.",
+        email="person@example.com",
+        phone="555-0100",
+        links=[CVLink(label="Portfolio", url="https://portfolio.example/", page=1)],
+    )
+    tex = render_tex(cv, "Person")
+    assert r"\textbar{}" in tex
+    assert r"\\textbar{}" not in tex
+    assert r"\par\smallskip" in tex
+
+
 def test_cover_letter_quality_rejects_empty_and_generic():
     report = evaluate_cover_letter("I am excited to apply.", "Python experience required. SQL skills required.", "Python and SQL")
     assert report.passed is False
     assert report.reasons
     assert report.generic_phrases
+
+
+def test_cover_letter_quality_rejects_copied_company_research_phrase():
+    report = evaluate_cover_letter(
+        "Dear team. I am applying because it calls for about Acme Acme aims to be the source of truth. "
+        + ("I built Python systems and evaluated models. " * 35),
+        "Python and model evaluation experience required.",
+        "Python systems and model evaluation.",
+    )
+    assert report.passed is False
+    assert any("company-research" in reason for reason in report.reasons)
+
+
+def test_company_overview_is_not_a_requirement_target():
+    report = evaluate_cover_letter(
+        "Dear team. I built Python systems and evaluated models. " * 30,
+        "Company Overview Acme is a leading platform. Python experience required. Model evaluation required.",
+        "Built Python systems and evaluated models.",
+    )
+    assert all("Company Overview" not in target for target in report.requirement_targets)
+
+
+def test_grounded_fallback_stays_inside_pdf_word_budget():
+    letter = grounded_fallback_letter(
+        candidate_name="Person",
+        company="Acme",
+        job_title="Applied ML Engineer",
+        job_description="Company Overview Acme builds products. Python experience required. Model evaluation required.",
+        corpus_items=[
+            "Built Python pipelines and measured model outcomes.",
+            "Deployed FastAPI services for reproducible workflows.",
+            "Evaluated scikit-learn models and documented results.",
+        ],
+    )
+    report = evaluate_cover_letter(
+        letter,
+        "Company Overview Acme builds products. Python experience required. Model evaluation required.",
+        "Built Python pipelines and measured model outcomes. Deployed FastAPI services. Evaluated scikit-learn models.",
+    )
+    assert report.passed
+    assert 275 <= report.word_count <= 325
 
 
 def test_cover_letter_quality_rejects_unconfirmed_policy_claims():
@@ -114,6 +180,31 @@ def test_grounded_fallback_letter_meets_quality_gate_with_two_job_clauses():
     report = evaluate_cover_letter(letter, description, corpus)
     assert report.passed is True
     assert report.requirement_matches >= 2
+
+
+def test_grounded_fallback_letter_removes_job_page_boilerplate():
+    letter = grounded_fallback_letter(
+        candidate_name="Person",
+        company="MANTECH",
+        job_title="Data Scientist",
+        job_description=(
+            "About MANTECH. MANTECH provides technology services. "
+            "The role emphasizes leverage their strong technical background and knowledge and to interpret and analyze "
+            "complex sets of data to produce actionable insights."
+        ),
+        corpus_items=[
+            "Performed EDA and time-series analysis on multivariate sensor data, increasing product throughput by 4%.",
+            "Built predictive maintenance models with TensorFlow and Scikit-learn, reducing unplanned downtime by 25%.",
+            "Deployed FastAPI-based REST services, reducing system response time by 40%.",
+        ],
+    )
+    assert "posting emphasizes" not in letter.lower()
+    assert "leverage their" not in letter.lower()
+    assert "calls for using a strong technical background" in letter
+    assert "About MANTECH" not in letter
+    assert "complex sets of data" not in letter
+    assert "actionable insights" in letter
+    assert ".." not in letter
 
 
 def test_cover_letter_quality_accepts_evidence_and_requirements():

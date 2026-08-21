@@ -14,11 +14,15 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from fpdf import FPDF
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import RectangleObject
 
 import job_scout.api as api_module
 import job_scout.voice.bridge as bridge_module
 import job_scout.voice.persona as persona
-from job_scout.graph.schemas import CVContent, RankedJob, TailoringPack
+from job_scout.graph.schemas import CVContent, CVLink, RankedJob, TailoringPack
+from job_scout.outreach_store import OutreachStore
 from job_scout.runner import RunResult
 from job_scout.voice.bridge import VoiceBridge
 from job_scout.voice.tools import CLIENT_TOOL_HANDLERS
@@ -205,6 +209,43 @@ def test_unknown_tool_is_a_404_not_a_silent_empty_dict(client):
     assert "delete_everything" in response.json()["detail"]
 
 
+def test_contact_discovery_requires_user_approved_source_text(client):
+    response = client.post(
+        "/api/contacts/discover",
+        json={"sources": [{"url": "https://example.com/team", "text": "Jordan Lee, Head of Engineering: jordan@example.com"}]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["contacts"][0]["email"] == "jordan@example.com"
+    assert "never sends" in body["warning"]
+
+
+def test_outreach_generation_is_local_and_grounded(client, bridge, monkeypatch, sample_profile, tmp_path):
+    bridge.register_thread("t1")
+    bridge.record_profile(sample_profile, "cv text", "t1")
+    posting = make_job("j1", "Applied ML Engineer", "Acme")
+    posting.description = "Experience with Python programming and model evaluation required."
+    ranked = RankedJob(job=posting, fit_score=91, fit_explanation="fits")
+    pack = TailoringPack(
+        cv=CVContent(headline="Applied ML", summary="Grounded", projects=[]),
+        cover_letter="Grounded letter",
+    )
+    pack.cv.projects = []
+    monkeypatch.setattr(bridge_module, "checkpoint_values", lambda thread_id: {"ranked_jobs": [ranked], "tailoring": pack})
+    monkeypatch.setattr(api_module, "_OUTREACH_STORE", OutreachStore(tmp_path))
+    response = client.post(
+        "/api/outreach/generate",
+        json={
+            "job_id": "j1",
+            "contact": {"name": "Jordan Lee", "email": "jordan@example.com", "source_url": "https://example.com"},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "Applied ML Engineer" in body["video_script"]
+    assert "does not send" in " ".join(body["review_notes"])
+
+
 def test_state_is_empty_before_a_candidate_exists(client):
     body = client.get("/api/state").json()
     assert body["candidate"] is None and body["jobs"] == [] and body["pack"] is None
@@ -343,6 +384,94 @@ def test_pack_downloads_404_before_tailoring(client):
     assert client.get("/api/pack/tex").status_code == 404
     assert client.get("/api/pack/cover-letter/pdf").status_code == 404
     assert client.get("/api/pack/cover-letter/tex").status_code == 404
+
+
+def _write_linked_pdf(path: Path, text: str, url: str) -> None:
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=8)
+    pdf.multi_cell(0, 5, text)
+    pdf.output(str(path))
+    reader = PdfReader(str(path))
+    writer = PdfWriter()
+    writer.add_page(reader.pages[0])
+    writer.add_uri(0, url, RectangleObject((10, 10, 100, 20)))
+    with path.open("wb") as handle:
+        writer.write(handle)
+
+
+def test_pack_audit_gates_live_pdf_downloads(client, bridge, monkeypatch, sample_profile, tmp_path):
+    bridge.register_thread("t1")
+    link = CVLink(label="Portfolio", url="https://portfolio.example", page=1)
+    bridge.record_profile(sample_profile, "Python model evaluation and deployment evidence. " * 80, "t1", [link])
+    posting = make_job("j1", "Applied ML Engineer", "Acme")
+    posting.description = "Python programming experience required. Model evaluation experience required."
+    ranked = RankedJob(job=posting, fit_score=91, fit_explanation="fits")
+    letter = (
+        "Dear team. "
+        + ("I used Python programming to build data pipelines and support model evaluation. " * 28)
+        + "Sincerely, Candidate"
+    )
+    pack = TailoringPack(
+        cv=CVContent(headline="Applied ML", summary="Grounded", links=[link]),
+        cover_letter=letter,
+    )
+    cv_pdf = tmp_path / "tailored.pdf"
+    letter_pdf = tmp_path / "letter.pdf"
+    _write_linked_pdf(cv_pdf, "Python model evaluation and deployment evidence. " * 90, link.url)
+    _write_linked_pdf(letter_pdf, letter, "https://example.com/letter")
+    monkeypatch.setattr(
+        bridge_module,
+        "checkpoint_values",
+        lambda thread_id: {
+            "cv_text": "Python model evaluation and deployment evidence. " * 80,
+            "cv_links": [link],
+            "ranked_jobs": [ranked],
+            "selected_job_id": "j1",
+            "tailoring": pack,
+        },
+    )
+    monkeypatch.setattr(
+        api_module, "_render_paths", lambda: (cv_pdf, cv_pdf.with_suffix(".tex"), letter_pdf, letter_pdf.with_suffix(".tex"))
+    )
+    cv_pdf.with_suffix(".tex").write_text("cv", encoding="utf-8")
+    letter_pdf.with_suffix(".tex").write_text("letter", encoding="utf-8")
+
+    audit = client.get("/api/pack/audit")
+    assert audit.status_code == 200
+    assert audit.json()["passed"] is True
+    assert client.get("/api/pack/pdf").status_code == 200
+
+
+def test_failed_pack_audit_blocks_pdf_but_leaves_tex_fallback(client, bridge, monkeypatch, sample_profile, tmp_path):
+    bridge.register_thread("t1")
+    link = CVLink(label="Portfolio", url="https://portfolio.example", page=1)
+    bridge.record_profile(sample_profile, "Python model evaluation evidence. " * 80, "t1", [link])
+    posting = make_job("j1", "Applied ML Engineer", "Acme")
+    pack = TailoringPack(cv=CVContent(headline="Applied ML", summary="Grounded", links=[link]), cover_letter="Dear team.")
+    cv_pdf = tmp_path / "tailored.pdf"
+    letter_pdf = tmp_path / "letter.pdf"
+    _write_linked_pdf(cv_pdf, "Python model evaluation evidence. " * 90, "https://missing.example")
+    _write_linked_pdf(letter_pdf, "Dear team. " + ("Python model evaluation. " * 30), "https://example.com/letter")
+    ranked = RankedJob(job=posting, fit_score=91, fit_explanation="fits")
+    monkeypatch.setattr(
+        bridge_module,
+        "checkpoint_values",
+        lambda thread_id: {
+            "cv_text": "Python model evaluation evidence. " * 80,
+            "cv_links": [link],
+            "ranked_jobs": [ranked],
+            "selected_job_id": "j1",
+            "tailoring": pack,
+        },
+    )
+    tex = cv_pdf.with_suffix(".tex")
+    letter_tex = letter_pdf.with_suffix(".tex")
+    tex.write_text("cv", encoding="utf-8")
+    letter_tex.write_text("letter", encoding="utf-8")
+    monkeypatch.setattr(api_module, "_render_paths", lambda: (cv_pdf, tex, letter_pdf, letter_tex))
+    assert client.get("/api/pack/pdf").status_code == 409
+    assert client.get("/api/pack/tex").status_code == 200
 
 
 async def _never_disconnected() -> bool:

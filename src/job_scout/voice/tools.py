@@ -200,7 +200,7 @@ def get_run_status(parameters: dict | None = None) -> dict:
     announcing results that did not exist.
     """
     bridge = _bridge.get_bridge()
-    status = bridge.run_status()
+    status = bridge.run_status(include_lifecycle=True)
     if not status.get("running") and "kind" not in status:
         has_results = bool(_bridge.ranked_jobs(bridge.snapshot().thread_id))
         status["has_results"] = has_results
@@ -210,6 +210,11 @@ def get_run_status(parameters: dict | None = None) -> dict:
             else " There are no results yet either — nothing has completed. If the user wants jobs, call start_search now."
         )
     return status
+
+
+def cancel_run(parameters: dict | None = None) -> dict:
+    """Cancel the current bounded run; it never cancels a provider remotely."""
+    return _bridge.get_bridge().cancel_run(str((parameters or {}).get("run_id") or "") or None)
 
 
 def open_application(parameters: dict | None = None) -> dict:
@@ -244,6 +249,7 @@ CLIENT_TOOL_HANDLERS = {
     "start_search": start_search,
     "start_tailoring": start_tailoring,
     "get_run_status": get_run_status,
+    "cancel_run": cancel_run,
     "open_application": open_application,
     "fill_safe_fields": fill_safe_fields,
 }

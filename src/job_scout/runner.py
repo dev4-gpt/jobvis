@@ -150,6 +150,8 @@ def stream_search(
         "fabrication_flags": 0,
         "fabrication_report": None,
         "cover_letter_quality": None,
+        "tailor_issue_codes": [],
+        "tailor_backtest_score": None,
     }
     graph.update_state(config, reset_search)
 
@@ -192,6 +194,9 @@ class TailorResult:
     fabrication_flags: int = 0
     fabrication_report: FabricationReport | None = None
     cover_letter_quality: CoverLetterQualityReport | None = None
+    issue_codes: list[str] = field(default_factory=list)
+    artifact_manifest: dict | None = None
+    backtest_score: float | None = None
     research_used: bool = False
     errors: list[str] = field(default_factory=list)
     cost_usd: float = 0.0
@@ -237,6 +242,8 @@ def stream_tailor(
         result.fabrication_flags = final.get("fabrication_flags", 0)
         result.fabrication_report = final.get("fabrication_report")
         result.cover_letter_quality = final.get("cover_letter_quality")
+        result.issue_codes = final.get("tailor_issue_codes", [])
+        result.backtest_score = final.get("tailor_backtest_score")
         result.research_used = bool(final.get("research_notes"))
         result.errors = final.get("errors", [])
     except Exception as exc:  # noqa: BLE001 - report as a failed run, keep the trace

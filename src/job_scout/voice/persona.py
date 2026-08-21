@@ -211,6 +211,12 @@ TOOL_SPECS: list[dict] = [
         "parameters": [],
     },
     {
+        "name": "cancel_run",
+        "description": "Cancel the active background search or tailoring run and discard any late result.",
+        "wait_for_response": True,
+        "parameters": [],
+    },
+    {
         "name": "open_application",
         "description": (
             "Open one ranked job in the visible local browser and inspect its Greenhouse, Lever, or Ashby form. "

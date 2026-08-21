@@ -87,12 +87,14 @@ def test_target_policy_controls_are_authoritative(sample_profile):
         "unknown",
         "required",
         "confirmed",
+        "AI Engineer\nForward-Deployed Engineer",
     )
     assert typed is not None
     assert prefs["country_scope"] == "us"
     assert prefs["employment_types"] == ["full_time"]
     assert prefs["accepted_work_modes"] == ["hybrid", "onsite"]
     assert prefs["primary_role_families"] == ["ai_ml", "forward_deployed"]
+    assert prefs["additional_role_titles"] == ["AI Engineer", "Forward-Deployed Engineer"]
     assert prefs["sponsorship_policy"] == "required"
     assert prefs["clearance_status"] == "confirmed"
 

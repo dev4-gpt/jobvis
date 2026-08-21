@@ -18,6 +18,7 @@ sources are included (see ``docs/extending_sources.md``).
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import json
 import logging
 import re
@@ -34,6 +35,7 @@ from langchain_core.tools import tool
 
 from job_scout.config import get_settings
 from job_scout.graph.schemas import JobPosting, SourceDiagnostic
+from job_scout.tools.direct_sources import AshbySource, GreenhouseSource, LeverSource, ProtocolLabsSource, USAJobsSource
 
 DESCRIPTION_LIMIT = 4000
 DEFAULT_LIMIT = 25
@@ -109,6 +111,12 @@ def location_to_country(location: str | None) -> str:
 def _truncate(text: str) -> str:
     """Cap a description at ``DESCRIPTION_LIMIT`` characters."""
     return (text or "")[:DESCRIPTION_LIMIT]
+
+
+def _content_hash(*parts: object) -> str:
+    """Stable short hash used to identify changed postings without storing them."""
+    value = "|".join(str(part or "").strip() for part in parts)
+    return hashlib.sha256(value.encode()).hexdigest()[:16]
 
 
 def _normalize_employment(value: object) -> str:
@@ -248,6 +256,12 @@ class JSearchSource:
                 r.get("job_salary_currency"),
             ),
             source_url=apply_url,
+            listing_url=apply_url,
+            application_url=apply_url,
+            source_record_id=str(r.get("job_id") or r.get("id") or ""),
+            ats="unknown",
+            freshness="fresh",
+            content_hash=_content_hash(r.get("job_title"), r.get("employer_name"), apply_url, r.get("job_description")),
         )
 
 
@@ -309,6 +323,13 @@ class AdzunaSource:
             posted_at=r.get("created"),
             salary_text=_salary_text(r.get("salary_min"), r.get("salary_max"), r.get("salary_period")),
             source_url=apply_url,
+            listing_url=apply_url,
+            application_url=apply_url,
+            source_record_id=str(r.get("id") or ""),
+            freshness="fresh",
+            content_hash=_content_hash(
+                r.get("title"), (r.get("company") or {}).get("display_name"), apply_url, r.get("description")
+            ),
         )
 
 
@@ -349,6 +370,11 @@ class RemotiveSource:
             posted_at=r.get("publication_date"),
             salary_text=r.get("salary", "") or "",
             source_url=source_url,
+            listing_url=source_url,
+            application_url=source_url,
+            source_record_id=str(r.get("id") or ""),
+            freshness="fresh",
+            content_hash=_content_hash(r.get("title"), r.get("company_name"), source_url, r.get("description")),
         )
 
 
@@ -413,6 +439,11 @@ def run_search_detailed(
     adzuna: AdzunaSource | None = None,
     remotive: RemotiveSource | None = None,
     cache: CacheSource | None = None,
+    greenhouse: GreenhouseSource | None = None,
+    lever: LeverSource | None = None,
+    ashby: AshbySource | None = None,
+    usajobs: USAJobsSource | None = None,
+    protocol_labs: ProtocolLabsSource | None = None,
 ) -> SearchResult:
     """Search across the sources in order and return ``(jobs, sources_used)``.
 
@@ -424,6 +455,16 @@ def run_search_detailed(
     adzuna = adzuna or AdzunaSource()
     remotive = remotive or RemotiveSource()
     cache = cache or CacheSource()
+    settings = get_settings()
+    direct_sources = settings.direct_sources_enabled or any(
+        source is not None for source in (greenhouse, lever, ashby, usajobs, protocol_labs)
+    )
+    if direct_sources:
+        greenhouse = greenhouse or GreenhouseSource()
+        lever = lever or LeverSource()
+        ashby = ashby or AshbySource()
+        usajobs = usajobs or USAJobsSource()
+        protocol_labs = protocol_labs or ProtocolLabsSource()
 
     jobs: list[JobPosting] = []
     used: list[str] = []
@@ -456,6 +497,18 @@ def run_search_detailed(
     else:
         diagnostics["adzuna"] = SourceDiagnostic(source="adzuna", requested=False, completed=True, error="not configured")
     fetchers["remotive"] = _tracked("remotive", lambda: remotive.fetch(query, location, country, remote, limit))
+    if direct_sources:
+        for source in (greenhouse, lever, ashby, usajobs, protocol_labs):
+            if source is None:
+                continue
+            if source.available:
+                fetchers[source.name] = _tracked(
+                    source.name, lambda source=source: source.fetch(query, location, country, remote, limit)
+                )
+            else:
+                diagnostics[source.name] = SourceDiagnostic(
+                    source=source.name, requested=False, completed=True, error="not configured"
+                )
 
     def _complete(name: str, found: list[JobPosting], error: str | None = None) -> None:
         diagnostic = diagnostics.setdefault(name, SourceDiagnostic(source=name))
@@ -470,7 +523,7 @@ def run_search_detailed(
         # diagnostic with ``None``.
         diagnostic.error = error or failure_reason or diagnostic.error
 
-    concurrent = get_settings().scout_concurrent_sources and len(fetchers) > 1
+    concurrent = settings.scout_concurrent_sources and len(fetchers) > 1
     pool: ThreadPoolExecutor | None = None
     soft_deadline = get_settings().scout_source_soft_deadline if concurrent else None
     if concurrent:
@@ -516,16 +569,20 @@ def run_search_detailed(
             jobs.extend(found)
 
     try:
-        # Phase 1: give jsearch a soft deadline; adzuna/remotive are already
-        # running and will usually be done by the time we look at them.
-        add("jsearch", fetch("jsearch", timeout=soft_deadline))
-        if len(_dedupe(jobs)) < 5:
-            add("adzuna", fetch("adzuna"))
+        # Phase 1: consume direct sources first when enabled, then the
+        # existing aggregators. Every requested source is observed, while the
+        # final result remains capped and deduplicated.
+        priority = ["greenhouse", "lever", "ashby", "usajobs", "protocol_labs", "jsearch", "adzuna"]
+        for source_name in priority:
+            if source_name in fetchers:
+                add(source_name, fetch(source_name, timeout=soft_deadline if source_name == "jsearch" else None))
+                if len(_dedupe(jobs)) >= 5:
+                    break
         if remote or len(_dedupe(jobs)) < 5:
             add("remotive", fetch("remotive"))
 
-        # Phase 2: if we're still short AND jsearch hasn't been consumed yet,
-        # wait for it — it may be the only source with results today.
+        # If a primary aggregator was slow, wait once before falling back to
+        # cache; this is bounded and never starts another provider call.
         if len(_dedupe(jobs)) < 5 and "jsearch" not in used and concurrent:
             add("jsearch", fetch("jsearch"))
 
@@ -561,6 +618,11 @@ def run_search(
     adzuna: AdzunaSource | None = None,
     remotive: RemotiveSource | None = None,
     cache: CacheSource | None = None,
+    greenhouse: GreenhouseSource | None = None,
+    lever: LeverSource | None = None,
+    ashby: AshbySource | None = None,
+    usajobs: USAJobsSource | None = None,
+    protocol_labs: ProtocolLabsSource | None = None,
 ) -> tuple[list[JobPosting], list[str]]:
     """Legacy-compatible search API returning jobs and consumed source names."""
     result = run_search_detailed(
@@ -573,6 +635,11 @@ def run_search(
         adzuna=adzuna,
         remotive=remotive,
         cache=cache,
+        greenhouse=greenhouse,
+        lever=lever,
+        ashby=ashby,
+        usajobs=usajobs,
+        protocol_labs=protocol_labs,
     )
     return result.jobs, result.sources_used
 

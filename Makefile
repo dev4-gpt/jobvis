@@ -32,6 +32,9 @@ setup: ## Install deps and pre-commit hooks
 app: preflight port-check ## Launch both surfaces: wizard on configured port and console on configured port
 	cd "$(REPO_ROOT)" && $(JOBVIS_WIZARD_ENV) $(JOBVIS_CONSOLE_ENV) PYTHONPATH=src uv run python -m job_scout.app
 
+.PHONY: restart
+restart: stop app ## Stop Jobvis listeners and relaunch both surfaces
+
 .PHONY: preflight
 preflight: source-check web-check ## Validate source, console build, imports, and model configuration before launch
 	$(UV_RUN) python -m job_scout.health
@@ -123,6 +126,20 @@ backtest: ## Run the deterministic application-pack backtest (CV= PACK= JOB=)
 	@test -n "$(JOB)" || (echo "Usage: make backtest CV=/path/to/cv.pdf PACK=/path/to/pack.json JOB=/path/to/job.txt"; exit 2)
 	$(UV_RUN) python scripts/backtest_pack.py --cv "$(CV)" --pack "$(PACK)" --job-description "$(JOB)" $(if $(OUTPUT),--output "$(OUTPUT)",)
 
+.PHONY: pack-e2e
+pack-e2e: ## Run one provider-backed local search→tailor→PDF audit (CV=, YES=1)
+	@test -n "$(CV)" || (echo "Usage: make pack-e2e CV=/path/to/resume.pdf YES=1"; exit 2)
+	@test "$(YES)" = "1" || (echo "This uses configured providers. Re-run with YES=1 to execute."; exit 2)
+	$(UV_RUN) python scripts/verify_local_pack.py --cv "$(CV)" --yes $(if $(OUTPUT),--output "$(OUTPUT)",)
+
+.PHONY: pack-audit
+pack-audit: ## Audit downloaded PDFs and preserved links (ORIGINAL_CV= TAILORED_CV= JOB= COVER_LETTER_PDF=|COVER_LETTER_TEXT=)
+	@test -n "$(ORIGINAL_CV)" || (echo "Usage: make pack-audit ORIGINAL_CV=/path/original.pdf TAILORED_CV=/path/tailored.pdf JOB=/path/job.txt COVER_LETTER_PDF=/path/letter.pdf"; exit 2)
+	@test -n "$(TAILORED_CV)" || (echo "Usage: make pack-audit ORIGINAL_CV=/path/original.pdf TAILORED_CV=/path/tailored.pdf JOB=/path/job.txt COVER_LETTER_PDF=/path/letter.pdf"; exit 2)
+	@test -n "$(JOB)" || (echo "Usage: make pack-audit ORIGINAL_CV=/path/original.pdf TAILORED_CV=/path/tailored.pdf JOB=/path/job.txt COVER_LETTER_PDF=/path/letter.pdf"; exit 2)
+	@test -n "$(COVER_LETTER_PDF)$(COVER_LETTER_TEXT)" || (echo "Provide COVER_LETTER_PDF or COVER_LETTER_TEXT"; exit 2)
+	$(UV_RUN) python scripts/audit_application_pack.py --original-cv "$(ORIGINAL_CV)" --tailored-cv "$(TAILORED_CV)" --job-description "$(JOB)" $(if $(COVER_LETTER_PDF),--cover-letter-pdf "$(COVER_LETTER_PDF)",) $(if $(COVER_LETTER_TEXT),--cover-letter-text "$(COVER_LETTER_TEXT)",) $(if $(CV_TEX),--cv-tex "$(CV_TEX)",) $(if $(COVER_LETTER_TEX),--cover-letter-tex "$(COVER_LETTER_TEX)",) $(if $(OUTPUT),--output "$(OUTPUT)",)
+
 .PHONY: queue
 queue: ## Create the Opik annotation queue + feedback definitions
 	$(UV_RUN) python scripts/setup_annotation_queue.py --queue
@@ -143,6 +160,10 @@ lint: ## Lint with ruff
 health: source-check ## Run the keyless import/config health check
 	$(UV_RUN) python -m job_scout.health
 
+.PHONY: doctor
+doctor: source-check ## Run bounded local diagnostics without contacting providers
+	$(UV_RUN) python scripts/doctor.py
+
 .PHONY: ci
 ci: ## Run the keyless checks used by pull-request CI
 	$(UV_RUN) ruff format --check .
@@ -159,6 +180,13 @@ format: ## Format with ruff
 .PHONY: gates
 gates: ## Deterministic eval regression gate (Opik dataset access, zero LLM calls)
 	$(UV_RUN) pytest gates/ -v
+
+.PHONY: checkmate
+checkmate: source-check test gates ## Full local Jobvis release gate
+	$(UV_RUN) python scripts/checkmate.py
+
+.PHONY: release-check
+release-check: doctor ci gates checkmate ## Run every local release gate before committing or pushing
 
 .PHONY: search-bench
 search-bench: ## Paired soft-deadline benchmark (live job APIs, no LLM calls)

@@ -12,6 +12,8 @@ export type Job = {
   company: string;
   location: string;
   url: string;
+  listing_url?: string;
+  application_url?: string;
   fit_score: number;
   why: string;
   final_priority_score?: number;
@@ -36,6 +38,7 @@ export type Job = {
 };
 
 export type Pack = {
+  job_id?: string;
   headline: string;
   summary: string;
   cover_letter: string;
@@ -47,8 +50,11 @@ export type Pack = {
 };
 
 export type ApplicationState = {
+  application_id?: string;
   job_id: string;
   url: string;
+  listing_url?: string;
+  application_url?: string;
   status: string;
   message: string;
   ats: string | null;
@@ -77,6 +83,9 @@ export type RunStatus = {
   failed?: boolean;
   error?: string;
   note?: string;
+  run_id?: string;
+  phase?: string;
+  cancelled?: boolean;
 };
 
 export type State = {
@@ -118,6 +127,47 @@ export type Config = {
   has_candidate: boolean;
 };
 
+export type ContactCandidate = {
+  name: string;
+  title: string;
+  email: string;
+  source_url: string;
+  evidence: string;
+  confidence: number;
+  requires_manual_verification: boolean;
+};
+
+export type OutreachDraft = {
+  draft_id: string;
+  job_id: string;
+  company: string;
+  role: string;
+  contact?: ContactCandidate | null;
+  subject: string;
+  email_body: string;
+  video_script: string;
+  why_me: string[];
+  requirement_targets: string[];
+  evidence_refs: string[];
+  review_notes: string[];
+  created_at: string;
+};
+
+export type PackAudit = {
+  passed: boolean;
+  original_cv: string;
+  tailored_cv: string;
+  cover_letter: string;
+  cv_pages: number;
+  cv_words: number;
+  cover_letter_words: number;
+  source_links: number;
+  generated_links: number;
+  missing_links: string[];
+  issues: { code: string; severity: string; message: string }[];
+  hashes: Record<string, string>;
+};
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${BASE}${path}`);
   if (!response.ok) throw new Error(`${path} failed: ${response.status}`);
@@ -147,6 +197,15 @@ export async function fillSafeFields(approvedFieldIds: string[]): Promise<Applic
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.detail ?? `safe fill failed: ${response.status}`);
   return body as ApplicationState;
+}
+
+export async function cancelRun(runId?: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`${BASE}/api/run/cancel`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(runId ? { run_id: runId } : {}),
+  });
+  return (await response.json()) as Record<string, unknown>;
 }
 
 export type SessionStart = {
@@ -195,3 +254,21 @@ export async function getLastVoiceError(): Promise<{ reason: string; quota: bool
 export const packUrl = (kind: "pdf" | "tex") => `${BASE}/api/pack/${kind}`;
 export const coverLetterUrl = (kind: "pdf" | "tex") => `${BASE}/api/pack/cover-letter/${kind}`;
 export const eventsUrl = () => `${BASE}/api/events`;
+
+export async function auditPack(): Promise<PackAudit> {
+  const response = await fetch(`${BASE}/api/pack/audit`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail?.message ?? body.detail ?? `pack audit failed: ${response.status}`);
+  return body as PackAudit;
+}
+
+export async function generateOutreach(jobId: string, contact?: ContactCandidate): Promise<OutreachDraft> {
+  const response = await fetch(`${BASE}/api/outreach/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ job_id: jobId, ...(contact ? { contact } : {}) }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail ?? `outreach generation failed: ${response.status}`);
+  return body as OutreachDraft;
+}

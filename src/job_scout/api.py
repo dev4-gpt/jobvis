@@ -37,15 +37,21 @@ from fastapi.staticfiles import StaticFiles
 
 from job_scout import candidate_store
 from job_scout.application.controller import get_application_controller
-from job_scout.candidate_fit import preferences_from_dict
+from job_scout.candidate_fit import assess_eligibility, preferences_from_dict
 from job_scout.config import get_settings
-from job_scout.graph.schemas import Profile, RankedJob, TailoringPack
+from job_scout.evals.artifacts import audit_generated_pack
+from job_scout.evals.pack_loop import render_verified_pack
+from job_scout.graph.schemas import JobPosting, Profile, RankedJob, TailoringPack
+from job_scout.outreach import ContactCandidate, PublicContactSource, build_outreach_draft, discover_public_contacts
+from job_scout.outreach_store import OutreachStore
 from job_scout.renderer import render_cover_letter_pdf, render_pdf
+from job_scout.tools.jobs_api import run_search_detailed
 from job_scout.voice import bridge as voice_bridge
 from job_scout.voice import is_voice_available
 from job_scout.voice.announce import run_announcement
 from job_scout.voice.persona import greeting_variables
 from job_scout.voice.tools import CLIENT_TOOL_HANDLERS
+from job_scout.watchlists import Watchlist, WatchlistStore
 
 TOKEN_URL = "https://api.elevenlabs.io/v1/convai/conversation/token"  # noqa: S105 - an endpoint, not a credential
 
@@ -53,6 +59,9 @@ TOKEN_URL = "https://api.elevenlabs.io/v1/convai/conversation/token"  # noqa: S1
 # it (a different build output, or a checkout that is not the repo root).
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _APPLICATION = get_application_controller()
+_APPLICATION_STORE = _APPLICATION.store
+_WATCHLIST_STORE = WatchlistStore()
+_OUTREACH_STORE = OutreachStore()
 
 
 def web_dir() -> Path:
@@ -95,6 +104,8 @@ def _job_row(ranked: RankedJob, rank: int) -> dict:
     )
     if has_policy:
         row.update(
+            listing_url=ranked.job.listing_url or ranked.job.source_url or ranked.job.url,
+            application_url=ranked.job.application_url or ranked.job.url,
             final_priority_score=ranked.final_priority_score or ranked.fit_score,
             role_fit_score=ranked.role_fit_score,
             evidence_fit_score=ranked.evidence_fit_score,
@@ -137,12 +148,15 @@ def _pack_payload(values: dict) -> dict | None:
         return None
     flags = int(values.get("fabrication_flags") or 0)
     return {
+        "job_id": str(values.get("selected_job_id") or ""),
         "headline": pack.cv.headline,
         "summary": pack.cv.summary,
         "cover_letter": pack.cover_letter,
         "honesty_note": pack.honesty_note,
         "links": [link.model_dump() for link in pack.cv.links],
         "flags": flags,
+        "quality_issue_codes": list(values.get("tailor_issue_codes") or []),
+        "artifact_manifest": _RENDER_CACHE.get("manifest"),
         "verdict": _verdict(flags),
         "cover_letter_quality": values.get("cover_letter_quality").model_dump()
         if values.get("cover_letter_quality") is not None
@@ -212,14 +226,21 @@ def current_state() -> dict:
             "diagnostics": [diagnostic.model_dump(mode="json") for diagnostic in values.get("source_diagnostics") or []],
         },
         "pack": _pack_payload(values),
-        "run": bridge.run_status(),
+        "run": bridge.run_status(include_lifecycle=True),
         "application": _APPLICATION.state.public(),
     }
 
 
 # One render per pack, keyed by its contents, so repeated download clicks do
 # not recompile the same LaTeX twice.
-_RENDER_CACHE: dict = {"key": None, "cv_pdf": None, "cv_tex": None, "letter_pdf": None, "letter_tex": None}
+_RENDER_CACHE: dict = {
+    "key": None,
+    "cv_pdf": None,
+    "cv_tex": None,
+    "letter_pdf": None,
+    "letter_tex": None,
+    "manifest": None,
+}
 
 
 def _render_paths() -> tuple[Path | None, Path | None, Path | None, Path | None]:
@@ -230,18 +251,60 @@ def _render_paths() -> tuple[Path | None, Path | None, Path | None, Path | None]
     pack: TailoringPack | None = values.get("tailoring")
     if pack is None:
         return None, None, None, None
-    key = hash((pack.cover_letter, pack.cv.model_dump_json()))
+    key = hash(
+        (
+            str(values.get("selected_job_id") or ""),
+            pack.cover_letter,
+            pack.cv.model_dump_json(),
+            tuple(str(item) for item in values.get("cv_links") or pack.cv.links),
+            values.get("tailor_backtest_score"),
+        )
+    )
     if _RENDER_CACHE["key"] != key:
         name = (snap.profile.name if snap.profile else None) or "Candidate"
         out_dir = Path(tempfile.mkdtemp(prefix="job_scout_render_"))
-        cv_result = render_pdf(pack.cv, name, out_dir)
-        letter_result = render_cover_letter_pdf(pack.cover_letter, name, out_dir)
+        selected = next(
+            (item for item in values.get("ranked_jobs") or [] if item.job.job_id == values.get("selected_job_id")),
+            None,
+        )
+        source_text = str(values.get("cv_text") or "")
+        source_links = list(values.get("cv_links") or pack.cv.links)
+        if source_text or source_links or selected:
+            verified = render_verified_pack(
+                pack,
+                candidate_name=name,
+                source_text=source_text,
+                source_links=source_links,
+                job_description=selected.job.description if selected else "",
+                company=selected.job.company if selected else "your team",
+                job_title=selected.job.title if selected else "this role",
+                out_dir=out_dir,
+                selected_job_id=str(values.get("selected_job_id") or ""),
+                generation_id=snap.thread_id,
+                backtest_score=values.get("tailor_backtest_score"),
+            )
+            cv_result = verified.cv
+            letter_result = verified.cover_letter
+            manifest = verified.manifest.as_dict()
+        else:
+            cv_result = render_pdf(pack.cv, name, out_dir)
+            letter_result = render_cover_letter_pdf(pack.cover_letter, name, out_dir)
+            manifest = {
+                "status": "withheld",
+                "cv_pdf": None,
+                "cv_tex": str(cv_result.tex_path) if cv_result.tex_path else None,
+                "cover_letter_pdf": None,
+                "cover_letter_tex": str(letter_result.tex_path) if letter_result.tex_path else None,
+                "pdfs_ready": False,
+                "issue_codes": ["missing_audit_context"],
+            }
         _RENDER_CACHE.update(
             key=key,
             cv_pdf=cv_result.pdf_path,
             cv_tex=cv_result.tex_path,
             letter_pdf=letter_result.pdf_path,
             letter_tex=letter_result.tex_path,
+            manifest=manifest,
         )
     return (
         _RENDER_CACHE["cv_pdf"],
@@ -249,6 +312,46 @@ def _render_paths() -> tuple[Path | None, Path | None, Path | None, Path | None]
         _RENDER_CACHE["letter_pdf"],
         _RENDER_CACHE["letter_tex"],
     )
+
+
+def _pack_audit() -> dict:
+    """Run the no-LLM artifact gate against the current checkpoint pack."""
+    ensure_session()
+    bridge = voice_bridge.get_bridge()
+    snap = bridge.snapshot()
+    values = voice_bridge.checkpoint_values(snap.thread_id)
+    pack: TailoringPack | None = values.get("tailoring")
+    if pack is None:
+        raise HTTPException(status_code=404, detail="no tailored pack to audit")
+    cv_pdf, cv_tex, letter_pdf, letter_tex = _render_paths()
+    selected = next(
+        (item for item in values.get("ranked_jobs") or [] if item.job.job_id == values.get("selected_job_id")),
+        None,
+    )
+    report = audit_generated_pack(
+        str(values.get("cv_text") or ""),
+        snap.cv_links or pack.cv.links,
+        cv_pdf or "",
+        cover_letter_pdf=letter_pdf,
+        cover_letter_text=pack.cover_letter,
+        job_description=selected.job.description if selected else "",
+        cv_tex=cv_tex,
+        cover_letter_tex=letter_tex,
+    )
+    return report.as_dict()
+
+
+def _require_pack_audit() -> None:
+    """Prevent a failed rendered pack from being presented as ready."""
+    report = _pack_audit()
+    if not report["passed"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "pack failed deterministic artifact checks; download the .tex fallback and review the report",
+                "audit": report,
+            },
+        )
 
 
 def _jsonable(value: Any, path: str = "") -> Any:
@@ -423,6 +526,11 @@ def create_app() -> FastAPI:
         ensure_session()
         return handler(parameters or {})
 
+    @app.post("/api/run/cancel")
+    def cancel_run(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        """Request cancellation of the current voice/background run."""
+        return voice_bridge.get_bridge().cancel_run(str((parameters or {}).get("run_id") or "") or None)
+
     @app.get("/api/state")
     def state() -> dict:
         # Same guard as the SSE frames: the console losing its state endpoint is
@@ -432,6 +540,172 @@ def create_app() -> FastAPI:
     @app.get("/api/application/state")
     def application_state() -> dict:
         return _APPLICATION.state.public()
+
+    @app.get("/api/applications")
+    def applications() -> dict:
+        """Return the local tracker only; no employer site is contacted."""
+        return {"applications": [record.model_dump(mode="json") for record in _APPLICATION_STORE.list()]}
+
+    @app.get("/api/outreach")
+    def outreach_drafts() -> dict:
+        """Return locally saved outreach drafts; no message is sent."""
+        return {"drafts": [draft.model_dump(mode="json") for draft in _OUTREACH_STORE.list()]}
+
+    @app.post("/api/contacts/discover")
+    def discover_contacts(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        """Extract explicit contacts from user-approved public page text.
+
+        Jobvis does not scrape LinkedIn, guess email patterns, or contact a
+        person. The caller must provide the page URL and the text they chose to
+        import or approve.
+        """
+        body = parameters or {}
+        raw_sources = body.get("sources") or []
+        if not isinstance(raw_sources, list) or not raw_sources:
+            raise HTTPException(status_code=400, detail="provide one or more user-approved public sources")
+        try:
+            sources = [PublicContactSource.model_validate(item) for item in raw_sources]
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid contact source: {exc}") from exc
+        contacts = discover_public_contacts(sources)
+        return {
+            "contacts": [contact.model_dump(mode="json") for contact in contacts],
+            "warning": "Verify each contact and employer policy manually. Jobvis never sends outreach.",
+        }
+
+    @app.post("/api/outreach/generate")
+    def generate_outreach(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        """Generate a grounded email/video draft for a checkpointed job pack."""
+        ensure_session()
+        bridge = voice_bridge.get_bridge()
+        snap = bridge.snapshot()
+        values = voice_bridge.checkpoint_values(snap.thread_id)
+        body = parameters or {}
+        job_id = str(body.get("job_id") or "")
+        ranked = next((item for item in values.get("ranked_jobs") or [] if item.job.job_id == job_id), None)
+        pack = values.get("tailoring")
+        if ranked is None:
+            raise HTTPException(status_code=404, detail="ranked job not found in the current checkpoint")
+        if pack is None:
+            raise HTTPException(status_code=409, detail="tailor the selected job before generating outreach")
+        try:
+            contact = ContactCandidate.model_validate(body["contact"]) if body.get("contact") else None
+            draft = build_outreach_draft(ranked, snap.profile, pack, contact) if snap.profile else None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid contact: {exc}") from exc
+        if draft is None:
+            raise HTTPException(status_code=409, detail="candidate profile is not available")
+        _OUTREACH_STORE.save(draft)
+        return draft.model_dump(mode="json")
+
+    @app.post("/api/applications/{application_id}/status")
+    def application_status(application_id: str, parameters: Annotated[dict | None, Body()] = None) -> dict:
+        body = parameters or {}
+        status = str(body.get("status") or "")
+        if status == "submitted":
+            status = "submitted_by_user"
+        try:
+            record = _APPLICATION_STORE.mark(application_id, status, str(body.get("detail") or ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if record is None:
+            raise HTTPException(status_code=404, detail="application record not found")
+        return record.model_dump(mode="json")
+
+    @app.post("/api/jobs/import")
+    def import_job(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        """Import a user-selected listing; this never crawls controlled boards."""
+        body = parameters or {}
+        url = str(body.get("application_url") or body.get("listing_url") or body.get("url") or "").strip()
+        if not url.startswith(("https://", "http://")):
+            raise HTTPException(status_code=400, detail="a user-provided HTTP(S) job URL is required")
+        job_id = str(body.get("job_id") or f"manual-{uuid4()}")
+        posting = JobPosting(
+            job_id=job_id,
+            title=str(body.get("title") or "Imported job"),
+            company=str(body.get("company") or "Unknown"),
+            location=str(body.get("location") or "Unspecified"),
+            description=str(body.get("description") or ""),
+            url=url,
+            listing_url=str(body.get("listing_url") or url),
+            application_url=str(body.get("application_url") or url),
+            source="manual",
+            employment_type=str(body.get("employment_type") or "unknown"),
+            work_mode=str(body.get("work_mode") or "unknown"),
+            source_url=str(body.get("listing_url") or url),
+            metadata_confidence=0.0,
+        )
+        bridge = voice_bridge.get_bridge()
+        snap = bridge.snapshot()
+        if snap.profile is not None and snap.thread_id:
+            values = voice_bridge.checkpoint_values(snap.thread_id)
+            assessment = assess_eligibility(posting, snap.profile, preferences_from_dict(values.get("candidate_preferences")))
+            ranked = RankedJob(
+                job=posting,
+                fit_score=assessment.final_priority_score,
+                final_priority_score=assessment.final_priority_score,
+                role_fit_score=assessment.role_fit_score,
+                evidence_fit_score=assessment.evidence_fit_score,
+                fit_explanation="Imported by the user; review the posting and evidence before tailoring.",
+                eligibility_status=assessment.status,
+                eligibility_reasons=assessment.reasons,
+                hard_blockers=assessment.hard_blockers,
+                primary_or_adjacent=assessment.role_bucket,
+                start_timing_fit=assessment.start_timing_fit,
+            )
+            voice_bridge.get_compiled_graph().update_state(
+                {"configurable": {"thread_id": snap.thread_id}},
+                {"jobs": [*(values.get("jobs") or []), posting], "ranked_jobs": [*(values.get("ranked_jobs") or []), ranked]},
+            )
+        record = _APPLICATION_STORE.create_for_job(
+            job_id=job_id,
+            title=str(body.get("title") or "Imported job"),
+            company=str(body.get("company") or "Unknown"),
+            listing_url=str(body.get("listing_url") or url),
+            application_url=str(body.get("application_url") or url),
+            source=str(body.get("source") or "manual"),
+        )
+        return record.model_dump(mode="json")
+
+    @app.get("/api/watchlists")
+    def watchlists() -> dict:
+        return {"watchlists": [item.model_dump(mode="json") for item in _WATCHLIST_STORE.list()]}
+
+    @app.post("/api/watchlists")
+    def create_watchlist(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        body = parameters or {}
+        query = str(body.get("query") or "").strip()
+        if not query:
+            raise HTTPException(status_code=400, detail="watchlist query is required")
+        item = Watchlist(
+            name=str(body.get("name") or query),
+            query=query,
+            location=str(body.get("location") or ""),
+            country=str(body.get("country") or "us"),
+            remote=bool(body.get("remote", False)),
+            enabled=bool(body.get("enabled", True)),
+        )
+        return _WATCHLIST_STORE.create(item).model_dump(mode="json")
+
+    @app.delete("/api/watchlists/{watchlist_id}")
+    def delete_watchlist(watchlist_id: str) -> dict:
+        if not _WATCHLIST_STORE.delete(watchlist_id):
+            raise HTTPException(status_code=404, detail="watchlist not found")
+        return {"deleted": True}
+
+    @app.post("/api/watchlists/{watchlist_id}/refresh")
+    def refresh_watchlist(watchlist_id: str) -> dict:
+        item = next((candidate for candidate in _WATCHLIST_STORE.list() if candidate.watchlist_id == watchlist_id), None)
+        if item is None:
+            raise HTTPException(status_code=404, detail="watchlist not found")
+        result = run_search_detailed(item.query, item.location or None, item.country, item.remote)
+        _WATCHLIST_STORE.mark_refreshed(item)
+        return {
+            "watchlist": item.model_dump(mode="json"),
+            "count": len(result.jobs),
+            "sources": result.sources_used,
+            "diagnostics": [d.model_dump(mode="json") for d in result.diagnostics],
+        }
 
     @app.post("/api/application/open")
     def application_open(parameters: Annotated[dict | None, Body()] = None) -> dict:
@@ -453,6 +727,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/application/fill-safe")
     def application_fill_safe(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        _require_pack_audit()
         approved = {str(item) for item in (parameters or {}).get("approved_field_ids", [])}
         cv_pdf, _, letter_pdf, _ = _render_paths()
         artifacts = {key: path for key, path in (("resume", cv_pdf), ("cover", letter_pdf)) if path is not None}
@@ -464,6 +739,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/pack/pdf")
     def pack_pdf() -> FileResponse:
+        _require_pack_audit()
         pdf, _, _, _ = _render_paths()
         if pdf is None:
             raise HTTPException(status_code=404, detail="no tailored CV yet (tectonic missing? try the .tex)")
@@ -478,6 +754,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/pack/cover-letter/pdf")
     def cover_letter_pdf() -> FileResponse:
+        _require_pack_audit()
         _, _, pdf, _ = _render_paths()
         if pdf is None:
             raise HTTPException(status_code=404, detail="no cover-letter PDF yet (tectonic missing? try the .tex)")
@@ -489,6 +766,20 @@ def create_app() -> FastAPI:
         if tex is None:
             raise HTTPException(status_code=404, detail="no tailored cover letter yet")
         return FileResponse(tex, filename="cover_letter.tex", media_type="application/x-tex")
+
+    @app.get("/api/pack/audit")
+    def pack_audit() -> dict:
+        """Return deterministic PDF/link/letter checks for the current pack."""
+        return _pack_audit()
+
+    @app.get("/api/pack/manifest")
+    def pack_manifest() -> dict:
+        """Return the authoritative download manifest and withheld reason."""
+        _render_paths()
+        manifest = _RENDER_CACHE.get("manifest")
+        if manifest is None:
+            raise HTTPException(status_code=404, detail="no tailored pack yet")
+        return manifest
 
     console = web_dir()
     if (console / "index.html").exists():

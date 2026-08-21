@@ -26,6 +26,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from job_scout import candidate_store
+from job_scout.evals.artifacts import ArtifactManifest
+from job_scout.evals.pack_loop import render_verified_pack
 from job_scout.graph.schemas import CandidatePreferences, CVLink, Profile, RankedJob
 from job_scout.profile import extract_profile
 from job_scout.renderer import render_cover_letter_pdf, render_pdf
@@ -598,6 +600,9 @@ def _pack_html(result: TailorResult) -> str:
     pack = result.pack
     quality = result.cover_letter_quality
     quality_html = ""
+    issue_html = ""
+    if result.issue_codes:
+        issue_html = '<div class="js-fab-warn"><b>Quality review markers:</b> ' + escape(", ".join(result.issue_codes)) + "</div>"
     if quality is not None and not quality.passed:
         policy_detail = ""
         if quality.policy_violations:
@@ -616,13 +621,30 @@ def _pack_html(result: TailorResult) -> str:
     honesty = ""
     if pack.honesty_note:
         honesty = f'<div class="js-honesty"><b>Honesty note</b> — {escape(pack.honesty_note)}</div>'
+    manifest_html = ""
+    manifest = result.artifact_manifest or {}
+    if manifest:
+        status = str(manifest.get("status") or "unknown")
+        if status == "ready":
+            manifest_html = (
+                '<div class="js-fab-ok">✓ Verified downloads ready: CV PDF, CV .tex, '
+                "cover-letter PDF, and cover-letter .tex.</div>"
+            )
+        else:
+            issues = ", ".join(str(item) for item in manifest.get("issue_codes") or []) or "artifact gate"
+            manifest_html = (
+                f'<div class="js-fab-warn"><b>PDFs withheld.</b> {escape(issues)}. '
+                "The .tex files remain available for review.</div>"
+            )
     letter = re.sub(r"(?is)<br\s*/?>", "\n", pack.cover_letter)
     letter = re.sub(r"(?is)</(?:p|div|li|h[1-6])\s*>", "\n", letter)
     letter = re.sub(r"(?is)<[^>]+>", "", letter)
     letter_html = escape(unescape(letter)).replace("\n", "<br>")
     return (
         '<div class="js-pack">'
+        f"{manifest_html}"
         f"{_fabrication_html(result)}"
+        f"{issue_html}"
         f"{quality_html}"
         '<p class="js-section-label">Cover letter</p>'
         f'<div class="js-card js-letter">{letter_html}</div>'
@@ -655,7 +677,9 @@ def _status(text: str, error: bool = False) -> str:
     return f'<div class="{cls}">{escape(text)}</div>'
 
 
-def _pack_downloads(result: TailorResult, profile: Profile | None) -> tuple[dict, dict, dict, dict, str]:
+def _pack_downloads(
+    result: TailorResult, profile: Profile | None, thread_id: str | None = None
+) -> tuple[dict, dict, dict, dict, str]:
     """Footer + download-button updates for a finished tailoring run (click or voice)."""
     hidden = gr.update(visible=False)
     footer = _tailor_footer_html(result)
@@ -663,19 +687,81 @@ def _pack_downloads(result: TailorResult, profile: Profile | None) -> tuple[dict
     if result.pack is not None:
         name = (profile.name if profile else None) or "Candidate"
         out_dir = Path(tempfile.mkdtemp(prefix="job_scout_render_"))
-        cv_render = render_pdf(result.pack.cv, name, out_dir)
-        letter_render = render_cover_letter_pdf(result.pack.cover_letter, name, out_dir)
+        verified = None
+        if thread_id:
+            values = voice_bridge.checkpoint_values(thread_id)
+            selected = next(
+                (item for item in values.get("ranked_jobs") or [] if item.job.job_id == values.get("selected_job_id")),
+                None,
+            )
+            source_text = str(values.get("cv_text") or "")
+            source_links = values.get("cv_links") or result.pack.cv.links
+            if source_text or source_links or selected:
+                verified = render_verified_pack(
+                    result.pack,
+                    candidate_name=name,
+                    source_text=source_text,
+                    source_links=list(source_links),
+                    job_description=selected.job.description if selected else "",
+                    company=selected.job.company if selected else "your team",
+                    job_title=selected.job.title if selected else "this role",
+                    out_dir=out_dir,
+                    selected_job_id=str(values.get("selected_job_id") or ""),
+                    generation_id=thread_id or "",
+                    backtest_score=result.backtest_score,
+                )
+                result.pack = verified.pack
+                result.artifact_manifest = verified.manifest.as_dict()
+        if verified is None:
+            cv_render = render_pdf(result.pack.cv, name, out_dir)
+            letter_render = render_cover_letter_pdf(result.pack.cover_letter, name, out_dir)
+            artifact_passed = False
+            artifact_message = (
+                "PDF withheld — the pack could not be audited against the current candidate and job checkpoint. "
+                "Download the .tex files to review; no unaudited PDF is presented as ready."
+            )
+            result.artifact_manifest = ArtifactManifest(
+                status="withheld",
+                cv_pdf=None,
+                cv_tex=str(cv_render.tex_path) if cv_render.tex_path else None,
+                cover_letter_pdf=None,
+                cover_letter_tex=str(letter_render.tex_path) if letter_render.tex_path else None,
+                cv_pages=0,
+                cv_words=0,
+                cover_letter_words=0,
+                source_links=len(result.pack.cv.links),
+                generated_links=len(result.pack.cv.links),
+                annotation_count=0,
+                issue_codes=("missing_audit_context",),
+                backtest_score=result.backtest_score,
+            ).as_dict()
+        else:
+            cv_render = verified.cv
+            letter_render = verified.cover_letter
+            artifact_passed = verified.report.passed
+            artifact_message = ""
+            if not artifact_passed:
+                details = "; ".join(issue.code for issue in verified.report.issues[:5]) or "unknown artifact issue"
+                artifact_message = (
+                    f"PDF withheld — cover letter is {verified.report.cover_letter_words}/350 words; "
+                    f"artifact gate failed after {verified.attempts} bounded attempt(s): {details}. "
+                    "Download the .tex files to review; no failed PDF is presented as ready."
+                )
         tex_btn = gr.update(value=str(cv_render.tex_path), visible=True)
         letter_tex_btn = gr.update(value=str(letter_render.tex_path), visible=True)
-        if cv_render.pdf_path is not None:
+        if artifact_passed and cv_render.pdf_path is not None:
             pdf_btn = gr.update(value=str(cv_render.pdf_path), visible=True)
-        if letter_render.pdf_path is not None:
+        if artifact_passed and letter_render.pdf_path is not None:
             letter_pdf_btn = gr.update(value=str(letter_render.pdf_path), visible=True)
         messages = list(dict.fromkeys(message for message in (cv_render.message, letter_render.message) if message))
+        if artifact_message:
+            messages.insert(0, artifact_message)
         if messages:
-            guidance = "PDF downloads are unavailable until Tectonic is installed. "
-            guidance += "Run `brew install tectonic`, restart Job Scout, and tailor again. "
-            guidance += "The .tex files are still available for Overleaf."
+            guidance = artifact_message
+            if not guidance:
+                guidance = "PDF downloads are unavailable until Tectonic is installed. "
+                guidance += "Run `brew install tectonic`, restart Job Scout, and tailor again. "
+                guidance += "The .tex files are still available for Overleaf."
             footer = f'<div class="js-footer">{escape(guidance)}</div>{footer}'
     return pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn, footer
 
@@ -742,7 +828,9 @@ def on_run_tick():
         )
     if run is not None and run.kind == "tailor" and run.tailor_result is not None and not run.failed:
         result = run.tailor_result
-        pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn, footer = _pack_downloads(result, bridge.snapshot().profile)
+        pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn, footer = _pack_downloads(
+            result, bridge.snapshot().profile, bridge.snapshot().thread_id
+        )
         return (
             gr.update(visible=False),
             gr.update(visible=False),
@@ -802,6 +890,7 @@ def _preferences_from_ui(
     authorization_status: str | None = None,
     sponsorship_policy: str | None = None,
     clearance_status: str | None = None,
+    additional_role_titles: str | list[str] | None = None,
 ) -> tuple[dict, CandidatePreferences | None]:
     """Combine the location chooser with the typed intent editor.
 
@@ -839,6 +928,13 @@ def _preferences_from_ui(
         updates["sponsorship_policy"] = sponsorship_policy
     if clearance_status is not None:
         updates["clearance_status"] = clearance_status
+    if additional_role_titles is not None:
+        raw_titles = (
+            additional_role_titles if isinstance(additional_role_titles, list) else re.split(r"[\n,]+", additional_role_titles)
+        )
+        updates["additional_role_titles"] = list(
+            dict.fromkeys(" ".join(str(title).split()).strip() for title in raw_titles if str(title).strip())
+        )[:12]
     if updates:
         typed = typed.model_copy(update=updates)
     return typed.model_dump(mode="json"), typed
@@ -942,7 +1038,7 @@ def _on_load(thread_id: str):
     voice_bridge.get_bridge().register_thread(thread_id)
     stored = candidate_store.load_candidate()
     if stored is None:
-        return (gr.update(),) * 17
+        return (gr.update(),) * 18
     choices, selected = _preference_selection(stored.profile, stored.preferences)
     effective = candidate_store.effective_profile(stored.profile, stored.preferences)
     voice_bridge.get_bridge().record_profile(effective, stored.cv_text, thread_id, stored.cv_links)
@@ -966,6 +1062,7 @@ def _on_load(thread_id: str):
         gr.update(value=str(policy.target_start_max or "")),
         gr.update(value=policy.accepted_work_modes),
         gr.update(value=policy.primary_role_families),
+        gr.update(value="\n".join(policy.additional_role_titles)),
         gr.update(value=policy.authorization_status),
         gr.update(value=policy.sponsorship_policy),
         gr.update(value=policy.clearance_status),
@@ -1035,6 +1132,7 @@ def on_find(
     authorization_status: str | None = None,
     sponsorship_policy: str | None = None,
     clearance_status: str | None = None,
+    additional_role_titles: str | list[str] | None = None,
 ):
     """Step 2 → 3: run the job-finding graph for the chosen locations and stream results.
 
@@ -1059,6 +1157,7 @@ def on_find(
         authorization_status,
         sponsorship_policy,
         clearance_status,
+        additional_role_titles,
     )
     effective = candidate_store.effective_profile(profile, prefs)
     stored = candidate_store.load_candidate()
@@ -1128,7 +1227,7 @@ def on_tailor(selected_job_id: str | None, thread_id: str, linkedin_zip: str | N
         elif kind == "result":
             result = payload  # type: ignore[assignment]
 
-    pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn, footer = _pack_downloads(result, profile)
+    pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn, footer = _pack_downloads(result, profile, thread_id)
     voice_bridge.get_bridge().record_step("tailor")
     _voice_context("Screen event: an application pack was just tailored via the on-screen button and is now visible.")
     yield (*go, _pack_html(result), footer, pdf_btn, tex_btn, letter_pdf_btn, letter_tex_btn)
@@ -1179,6 +1278,7 @@ def reset():
         gr.update(value=str(CandidatePreferences().target_start_max)),
         gr.update(value=CandidatePreferences().accepted_work_modes),
         gr.update(value=CandidatePreferences().primary_role_families),
+        gr.update(value="\n".join(CandidatePreferences().additional_role_titles)),
         gr.update(value=CandidatePreferences().authorization_status),
         gr.update(value=CandidatePreferences().sponsorship_policy),
         gr.update(value=CandidatePreferences().clearance_status),
@@ -1274,6 +1374,12 @@ def build_app() -> gr.Blocks:
                         ("MLOps / ML Platform", "mlops"),
                     ],
                     value=default_policy.primary_role_families,
+                )
+                additional_role_titles = gr.Textbox(
+                    label="Additional role titles (optional)",
+                    placeholder="AI Engineer\nForward-Deployed Engineer\nApplied Scientist",
+                    info="One title per line. These are added to the bounded similar-role search.",
+                    lines=3,
                 )
                 with gr.Row():
                     authorization_status = gr.Dropdown(
@@ -1398,6 +1504,7 @@ def build_app() -> gr.Blocks:
                 target_start_max,
                 accepted_work_modes,
                 primary_role_families,
+                additional_role_titles,
                 authorization_status,
                 sponsorship_policy,
                 clearance_status,
@@ -1450,6 +1557,7 @@ def build_app() -> gr.Blocks:
             target_start_max,
             accepted_work_modes,
             primary_role_families,
+            additional_role_titles,
             authorization_status,
             sponsorship_policy,
             clearance_status,
@@ -1501,6 +1609,7 @@ def build_app() -> gr.Blocks:
                 target_start_max,
                 accepted_work_modes,
                 primary_role_families,
+                additional_role_titles,
                 authorization_status,
                 sponsorship_policy,
                 clearance_status,
@@ -1529,11 +1638,7 @@ def main() -> None:
     _assert_port_available(CONSOLE_PORT, "console")
     serve_in_thread()
     identity = runtime_identity()
-    print(
-        "Jobvis source: "
-        f"{identity['source_root']} "
-        f"(branch={identity['source_branch']}, commit={identity['source_commit']})"
-    )
+    print(f"Jobvis source: {identity['source_root']} (branch={identity['source_branch']}, commit={identity['source_commit']})")
     print(f"Jobvis console: http://localhost:{CONSOLE_PORT}")
     build_app().launch(server_name="127.0.0.1", server_port=WIZARD_PORT, theme=THEME, css=CSS)
 

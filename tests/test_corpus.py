@@ -121,6 +121,24 @@ dbt.
     assert corpus.skills() == ["Python", "SQL", "dbt"]
 
 
+def test_pdf_black_circle_bullets_join_wrapped_lines():
+    cv = """\
+Academic Reports
+● Investigated adversarial attacks, including Fast Gradient Sign
+Method (FGSM) and Projected Gradient Descent (PGD), under strict L∞ budgets.
+● Reduced Top 1 accuracy from 70.4% to 5.0% with FGSM and to a complete
+0.0% with iterative PGD.
+"""
+    bullets = [item.text for item in build_corpus(cv).items if item.kind == "bullet"]
+    assert bullets == [
+        (
+            "Investigated adversarial attacks, including Fast Gradient Sign Method (FGSM) and Projected "
+            "Gradient Descent (PGD), under strict L∞ budgets."
+        ),
+        "Reduced Top 1 accuracy from 70.4% to 5.0% with FGSM and to a complete 0.0% with iterative PGD.",
+    ]
+
+
 def test_blank_lines_are_join_barriers():
     cv = "Summary\nFirst thought with no full stop\n\nA second thought standing entirely alone"
     corpus = build_corpus(cv)

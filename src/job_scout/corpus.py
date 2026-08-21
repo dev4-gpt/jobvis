@@ -40,7 +40,7 @@ _EDUCATION_HEADINGS = {"education", "ausbildung", "bildung", "studium"}
 # not an exact match ("Technical Skills", "Tech Stack", "Skills & Tools").
 _SKILL_HEADING_WORDS = {"skills", "skill", "kenntnisse", "technologies", "tools", "competencies", "stack"}
 
-_BULLET_GLYPHS = ("-", "•", "*", "–", "◦")
+_BULLET_GLYPHS = ("-", "•", "*", "–", "◦", "●")
 _TERMINAL_PUNCT = (".", "!", "?", ":", ";")
 _PHONEISH = re.compile(r"\+?\d[\d\s().\-/]{6,}")
 _PIPES = re.compile(r"\s*\|\s*")

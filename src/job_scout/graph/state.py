@@ -50,4 +50,6 @@ class AgentState(TypedDict, total=False):
     fabrication_flags: int
     fabrication_report: FabricationReport | None
     cover_letter_quality: CoverLetterQualityReport | None
+    tailor_issue_codes: list[str]
+    tailor_backtest_score: float | None
     candidate_preferences: CandidatePreferences | None

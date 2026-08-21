@@ -26,9 +26,25 @@ Contract:
   `tags`, `source`). Prefix `job_id` with the source name to avoid collisions.
 - **Truncate descriptions** to `DESCRIPTION_LIMIT` (4000 chars).
 
-The three shipped adapters live in `src/job_scout/tools/jobs_api.py`:
-`AdzunaSource` (primary, international, needs free keys), `RemotiveSource`
-(keyless, remote-only) and `CacheSource` (the committed offline dataset).
+The shipped adapters include the current aggregators in `src/job_scout/tools/jobs_api.py`
+and opt-in direct adapters in `src/job_scout/tools/direct_sources.py`:
+
+- Greenhouse, Lever, Ashby: explicit public board/account identifiers only.
+- USAJOBS: explicit API key and user-agent only.
+- Protocol Labs Network: best-effort public directory parser, clearly labeled.
+- Adzuna, JSearch, Remotive, and the committed cache remain available as before.
+
+Enable direct adapters deliberately with `JOBVIS_DIRECT_SOURCES_ENABLED=true`
+and configure only the boards you intend to query. A direct adapter failure is
+recorded in source diagnostics and does not turn into a false zero-result claim.
+Every normalized posting carries separate `listing_url`, `application_url`,
+`source_record_id`, `content_hash`, and freshness metadata.
+
+Remote.co, FlexJobs, Instahyre, and Protocol Jobs AI are controlled/manual
+connectors. Use the local **Import this job** flow with a user-selected URL;
+Jobvis does not crawl or aggregate those sites. The imported URL remains the
+provenance link and enters the same eligibility, tailoring, and review-gated
+application flow. LinkedIn and Indeed scraping are intentionally unsupported.
 
 ## Worked example: adding a hypothetical official API
 
@@ -91,3 +107,12 @@ actors (e.g. Apify LinkedIn actors), **even as optional adapters**:
 
 If you wire up a scraper privately, you accept those risks yourself. The
 supported, reproducible path is official APIs behind the `JobSource` interface.
+
+## Watchlists
+
+Watchlists are local query definitions, not a second job database. Create and
+refresh them through `/api/watchlists`; each refresh is on-demand, bounded by
+the same source timeouts, and stores only the query and last-refresh timestamp.
+An external launchd/cron schedule may call the refresh endpoint if the user
+explicitly wants a daily refresh. Job postings are fetched fresh and are not
+silently written into the candidate store.

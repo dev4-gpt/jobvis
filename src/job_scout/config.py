@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     jsearch_api_key: SecretStr = Field(default=SecretStr(""), alias="JSEARCH_API_KEY")
     adzuna_app_id: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_ID")
     adzuna_app_key: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_KEY")
+    greenhouse_board_tokens: str = Field(default="", alias="GREENHOUSE_BOARD_TOKENS")
+    lever_companies: str = Field(default="", alias="LEVER_COMPANIES")
+    ashby_job_boards: str = Field(default="", alias="ASHBY_JOB_BOARDS")
+    usajobs_api_key: SecretStr = Field(default=SecretStr(""), alias="USAJOBS_API_KEY")
+    usajobs_user_agent: str = Field(default="", alias="USAJOBS_USER_AGENT")
+    protocol_labs_jobs_url: str = Field(default="https://directory.plnetwork.io/jobs", alias="PROTOCOL_LABS_JOBS_URL")
+    direct_sources_enabled: bool = Field(default=False, alias="JOBVIS_DIRECT_SOURCES_ENABLED")
+    scout_source_timeout: float = Field(default=12.0, alias="SCOUT_SOURCE_TIMEOUT", ge=1.0, le=60.0)
+    jobvis_data_dir: str = Field(default="", alias="JOBVIS_DATA_DIR")
 
     tavily_api_key: SecretStr = Field(default=SecretStr(""), alias="TAVILY_API_KEY")
 
@@ -104,6 +113,12 @@ class Settings(BaseSettings):
         "ollama_base_url",
         "elevenlabs_agent_id",
         "elevenlabs_voice_id",
+        "greenhouse_board_tokens",
+        "lever_companies",
+        "ashby_job_boards",
+        "usajobs_user_agent",
+        "protocol_labs_jobs_url",
+        "jobvis_data_dir",
         mode="before",
     )
     @classmethod
@@ -175,6 +190,26 @@ class Settings(BaseSettings):
     def has_adzuna(self) -> bool:
         """Whether both Adzuna credentials are configured."""
         return bool(self.adzuna_app_id.get_secret_value() and self.adzuna_app_key.get_secret_value())
+
+    @staticmethod
+    def _configured_list(value: str) -> list[str]:
+        return [item.strip() for item in value.split(",") if item.strip()]
+
+    @property
+    def greenhouse_boards(self) -> list[str]:
+        return self._configured_list(self.greenhouse_board_tokens)
+
+    @property
+    def lever_accounts(self) -> list[str]:
+        return self._configured_list(self.lever_companies)
+
+    @property
+    def ashby_boards(self) -> list[str]:
+        return self._configured_list(self.ashby_job_boards)
+
+    @property
+    def has_usajobs(self) -> bool:
+        return bool(self.usajobs_api_key.get_secret_value() and self.usajobs_user_agent)
 
     @property
     def has_tavily(self) -> bool:

@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import queue
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import cast
+from uuid import uuid4
 
 from job_scout.graph import get_compiled_graph
 from job_scout.graph.schemas import CandidatePreferences, CVLink, Profile, RankedJob
@@ -58,13 +59,17 @@ class VoiceRun:
     """One voice-triggered background run and its observable progress."""
 
     kind: str  # "search" | "tailor"
+    run_id: str = field(default_factory=lambda: str(uuid4()))
+    phase: str = "queued"
     status: str = "starting…"
     done: bool = False
     failed: bool = False
+    cancelled: bool = False
     error: str = ""
     search_result: RunResult | None = None
     tailor_result: TailorResult | None = None
     ui_pushed: bool = False
+    cancel_event: threading.Event = field(default_factory=threading.Event, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -167,12 +172,12 @@ class VoiceBridge:
             return "No session yet — the user needs to open the app first."
         return self._launch("tailor", lambda run: self._drive_tailor(snap, run, selected_job_id))
 
-    def run_status(self) -> dict:
+    def run_status(self, *, include_lifecycle: bool = False) -> dict:
         with self._lock:
             run = self._run
             if run is None:
                 return {"running": False, "note": "Nothing is running right now."}
-            return {
+            result = {
                 "running": not run.done,
                 "kind": run.kind,
                 "latest_status": run.status,
@@ -180,6 +185,23 @@ class VoiceBridge:
                 "failed": run.failed,
                 "error": run.error,
             }
+            if include_lifecycle:
+                result.update(run_id=run.run_id, phase=run.phase, cancelled=run.cancelled)
+            return result
+
+    def cancel_run(self, run_id: str | None = None) -> dict:
+        """Request cancellation and prevent late results from being presented."""
+        with self._lock:
+            run = self._run
+            if run is None or run.done:
+                return {"cancelled": False, "note": "No active run to cancel."}
+            if run_id and run.run_id != run_id:
+                return {"cancelled": False, "note": "That run is no longer current."}
+            run.cancel_event.set()
+            run.cancelled = True
+            run.phase = "cancelling"
+            run.status = "cancelling"
+            return {"cancelled": True, "run_id": run.run_id, "note": "Cancellation requested; late results will be discarded."}
 
     def pop_finished_run(self) -> VoiceRun | None:
         """Hand a finished run to the UI exactly once (the Timer's 'pop')."""
@@ -235,19 +257,55 @@ class VoiceBridge:
 
     def _set_status(self, run: VoiceRun, status: str) -> None:
         with self._lock:
+            if run.cancel_event.is_set():
+                return
+            run.phase = "running"
             run.status = status
 
     def _finish(self, run: VoiceRun, *, failed: bool, error: str, step: str) -> None:
         with self._lock:
-            run.failed = failed
-            run.error = error
-            run.status = "failed" if failed else "done"
-            run.done = True
-            if not failed:
-                self._snapshot = replace(self._snapshot, step=step)
+            if run.cancel_event.is_set():
+                run.cancelled = True
+                run.phase = "cancelled"
+                run.status = "cancelled"
+                run.done = True
+                run.failed = False
+                run.error = ""
+            else:
+                run.phase = "failed" if failed else "completed"
+                run.failed = failed
+                run.error = error
+                run.status = "failed" if failed else "done"
+                run.done = True
+                if not failed:
+                    self._snapshot = replace(self._snapshot, step=step)
         # Callers set search_result/tailor_result before finishing, so what
         # subscribers receive here is always a complete run.
         self._publish(BridgeEvent("run_finished", run=run))
+
+    def _discard_checkpoint(self, thread_id: str, kind: str) -> None:
+        """Remove late graph output after cancellation so it cannot repaint the UI."""
+        if not thread_id:
+            return
+        config = {"configurable": {"thread_id": thread_id}}
+        if kind == "search":
+            update = {
+                "jobs": [],
+                "ranked_jobs": [],
+                "jobs_sources": [],
+                "source_diagnostics": [],
+                "selected_job_id": None,
+            }
+        else:
+            update = {
+                "tailoring": None,
+                "fabrication_flags": 0,
+                "fabrication_report": None,
+                "cover_letter_quality": None,
+                "tailor_issue_codes": [],
+                "tailor_backtest_score": None,
+            }
+        get_compiled_graph().update_state(config, update)
 
     def _drive_search(self, snap: WizardSnapshot, run: VoiceRun) -> None:
         assert snap.profile is not None  # guarded by start_search
@@ -263,6 +321,8 @@ class VoiceBridge:
                 selected_job_id=None,
             )
             for kind, payload in stream:
+                if run.cancel_event.is_set():
+                    break
                 if kind == "status":
                     self._set_status(run, str(payload))
                 elif kind == "result":
@@ -270,7 +330,10 @@ class VoiceBridge:
         except Exception as exc:  # noqa: BLE001 - a voice run must never take the app down
             result.failed, result.error_message = True, f"{type(exc).__name__}: {exc}"
         with self._lock:
-            run.search_result = result
+            if not run.cancel_event.is_set():
+                run.search_result = result
+        if run.cancel_event.is_set():
+            self._discard_checkpoint(snap.thread_id, "search")
         self._finish(run, failed=result.failed, error=result.error_message, step="results")
 
     def _drive_tailor(self, snap: WizardSnapshot, run: VoiceRun, selected_job_id: str) -> None:
@@ -283,6 +346,8 @@ class VoiceBridge:
                 linkedin_zip_path=snap.linkedin_zip_path,
             )
             for kind, payload in stream:
+                if run.cancel_event.is_set():
+                    break
                 if kind == "status":
                     self._set_status(run, str(payload))
                 elif kind == "result":
@@ -290,7 +355,10 @@ class VoiceBridge:
         except Exception as exc:  # noqa: BLE001 - a voice run must never take the app down
             result.failed, result.error_message = True, f"{type(exc).__name__}: {exc}"
         with self._lock:
-            run.tailor_result = result
+            if not run.cancel_event.is_set():
+                run.tailor_result = result
+        if run.cancel_event.is_set():
+            self._discard_checkpoint(snap.thread_id, "tailor")
         self._finish(run, failed=result.failed, error=result.error_message, step="tailor")
 
 

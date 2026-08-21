@@ -34,6 +34,8 @@ def test_backtest_reports_quality_and_link_failures():
     assert "https://github.example" in report.missing_links
     assert any(metric.name == "cover_letter" and not metric.passed for metric in report.metrics)
     assert report.failures
+    assert "cover_letter_quality" in report.failure_codes
+    assert "source_links" in report.failure_codes
 
 
 def test_improvement_stops_when_a_candidate_does_not_improve():

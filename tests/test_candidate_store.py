@@ -125,6 +125,7 @@ def test_on_load_restores_candidate_and_opens_step_two(tmp_store, fresh_bridge, 
         start_max,
         work_modes,
         role_families,
+        additional_roles,
         authorization,
         sponsorship,
         clearance,
@@ -142,6 +143,7 @@ def test_on_load_restores_candidate_and_opens_step_two(tmp_store, fresh_bridge, 
     assert start_max["value"] == "2027-03-31"
     assert work_modes["value"] == ["hybrid", "onsite"]
     assert "ai_ml" in role_families["value"]
+    assert additional_roles["value"] == ""
     assert authorization["value"] == "unknown"
     assert sponsorship["value"] == "unknown"
     assert clearance["value"] == "unknown"

@@ -18,6 +18,7 @@ export const TOOL_NAMES = [
   "start_search",
   "start_tailoring",
   "get_run_status",
+  "cancel_run",
   "open_application",
   "fill_safe_fields",
 ] as const;

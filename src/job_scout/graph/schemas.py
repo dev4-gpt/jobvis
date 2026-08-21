@@ -20,7 +20,22 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 Seniority = Literal["junior", "mid", "senior", "lead", "unknown"]
-JobSourceName = Literal["jsearch", "adzuna", "remotive", "cache"]
+JobSourceName = Literal[
+    "jsearch",
+    "adzuna",
+    "remotive",
+    "cache",
+    "greenhouse",
+    "lever",
+    "ashby",
+    "usajobs",
+    "protocol_labs",
+    "remote_co",
+    "flexjobs",
+    "instahyre",
+    "protocol_jobs_ai",
+    "manual",
+]
 EligibilityStatus = Literal["eligible", "borderline", "blocked"]
 RoleBucket = Literal["primary", "adjacent", "review"]
 
@@ -77,6 +92,10 @@ class CandidatePreferences(BaseModel):
             "mlops",
         ]
     )
+    additional_role_titles: list[str] = Field(
+        default_factory=list,
+        description="User-supplied job titles to search in addition to selected role families.",
+    )
     adjacent_role_policy: str = "show_separately"
     authorization_status: str = "unknown"
     sponsorship_policy: str = "unknown"
@@ -106,6 +125,13 @@ class JobPosting(BaseModel):
     sponsorship_signal: str = "unknown"
     salary_text: str = ""
     source_url: str = ""
+    listing_url: str = ""
+    application_url: str = ""
+    source_record_id: str = ""
+    ats: str = "unknown"
+    freshness: str = "unknown"
+    last_seen_at: str | None = None
+    content_hash: str = ""
     metadata_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 

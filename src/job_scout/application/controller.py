@@ -7,13 +7,17 @@ from pathlib import Path
 
 from job_scout.application.ats import ApplicantFacts, FormInspection, discover_fields
 from job_scout.application.browser import BrowserUnavailable, VisibleApplicationBrowser
+from job_scout.application.store import ApplicationStore
 from job_scout.graph.schemas import CVLink, Profile, RankedJob
 
 
 @dataclass
 class ApplicationState:
+    application_id: str = ""
     job_id: str = ""
     url: str = ""
+    listing_url: str = ""
+    application_url: str = ""
     status: str = "idle"
     message: str = ""
     inspection: FormInspection | None = None
@@ -21,8 +25,11 @@ class ApplicationState:
     def public(self) -> dict:
         inspection = self.inspection
         return {
+            "application_id": self.application_id,
             "job_id": self.job_id,
             "url": self.url,
+            "listing_url": self.listing_url,
+            "application_url": self.application_url,
             "status": self.status,
             "message": self.message,
             "ats": inspection.ats.value if inspection else None,
@@ -45,18 +52,32 @@ class ApplicationController:
 
     def __init__(self) -> None:
         self.browser = VisibleApplicationBrowser()
+        self.store = ApplicationStore()
         self.state = ApplicationState()
 
     def open(self, ranked: RankedJob, profile: Profile, links: list[CVLink]) -> dict:
-        if not ranked.job.url:
+        listing_url = ranked.job.listing_url or ranked.job.source_url or ranked.job.url
+        application_url = ranked.job.application_url or ranked.job.url or listing_url
+        if not application_url:
             self.state = ApplicationState(status="blocked", message="This job has no application URL.")
             return self.state.public()
+        record = self.store.create_for_job(
+            job_id=ranked.job.job_id,
+            title=ranked.job.title,
+            company=ranked.job.company,
+            listing_url=listing_url,
+            application_url=application_url,
+            source=ranked.job.source,
+        )
         try:
-            page = self.browser.open(ranked.job.url)
+            page = self.browser.open(application_url)
             if page is None:
                 self.state = ApplicationState(
+                    application_id=record.application_id,
                     job_id=ranked.job.job_id,
-                    url=ranked.job.url,
+                    url=application_url,
+                    listing_url=listing_url,
+                    application_url=application_url,
                     status="opened_manual",
                     message=(
                         "Opened the application in a private browser window. "
@@ -64,24 +85,45 @@ class ApplicationController:
                         "to enable form inspection and approved safe-field filling."
                     ),
                 )
+                self.store.mark(record.application_id, "opened", "Application opened in visible browser.")
                 return self.state.public()
             inspection = discover_fields(page.url, page.content())
         except Exception as exc:  # noqa: BLE001 - browser errors become a visible pause, never a crash
-            self.state = ApplicationState(job_id=ranked.job.job_id, url=ranked.job.url, status="blocked", message=str(exc))
+            self.state = ApplicationState(
+                application_id=record.application_id,
+                job_id=ranked.job.job_id,
+                url=application_url,
+                listing_url=listing_url,
+                application_url=application_url,
+                status="blocked",
+                message=str(exc),
+            )
             return self.state.public()
         inspection.proposals = _proposals_for(inspection, profile, links)
         self.state = ApplicationState(
+            application_id=record.application_id,
             job_id=ranked.job.job_id,
-            url=ranked.job.url,
+            url=application_url,
+            listing_url=listing_url,
+            application_url=application_url,
             status="review_mapping",
             message="Review the proposed mappings. Login, MFA, and CAPTCHA remain manual.",
             inspection=inspection,
         )
+        self.store.mark(record.application_id, "opened", "Application inspected; final submission remains manual.")
         return self.state.public()
 
     def inspect_html(self, url: str, html: str) -> dict:
         inspection = discover_fields(url, html)
-        self.state = ApplicationState(job_id=self.state.job_id, url=url, status="review_mapping", inspection=inspection)
+        self.state = ApplicationState(
+            application_id=self.state.application_id,
+            job_id=self.state.job_id,
+            url=url,
+            listing_url=self.state.listing_url,
+            application_url=url,
+            status="review_mapping",
+            inspection=inspection,
+        )
         return self.state.public()
 
     def fill_safe(self, approved_ids: set[str], artifacts: dict[str, Path] | None = None) -> dict:
@@ -97,6 +139,8 @@ class ApplicationController:
             return self.state.public()
         self.state.status = "final_review"
         self.state.message = f"Filled {len(filled)} approved safe fields. Review everything and click Submit yourself."
+        if self.state.application_id:
+            self.store.mark(self.state.application_id, "final_review", self.state.message)
         return self.state.public()
 
 

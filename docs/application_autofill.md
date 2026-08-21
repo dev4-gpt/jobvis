@@ -4,6 +4,18 @@ Jobvis prepares an application; a person submits it. The local browser layer
 exists to remove repetitive typing while keeping the consequential action in
 human hands.
 
+Each selected job has separate listing and direct-application links. The local
+tracker stores the job, asset manifest, review events, and current status under
+macOS Application Support (or `JOBVIS_DATA_DIR`). It never stores passwords,
+MFA answers, or a submit endpoint.
+
+The allowed status path is:
+
+`discovered → saved → tailored → reviewed → opened → safe_fields_filled → final_review → submitted_by_user`
+
+The final transition is a manual record only. Jobvis opens the employer page,
+fills only explicitly approved safe fields, and pauses before Submit.
+
 ## Flow
 
 1. Select a ranked job and choose **Open application**.

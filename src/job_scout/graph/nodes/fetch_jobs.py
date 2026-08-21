@@ -70,8 +70,30 @@ _ROLE_QUERIES = {
 }
 
 
+def _clean_custom_titles(titles: list[str], max_titles: int) -> list[str]:
+    """Keep user-added titles bounded and title-shaped before they reach job boards."""
+    cleaned: list[str] = []
+    for raw in titles:
+        title = " ".join(str(raw).split()).strip(" ,;|\n\t")
+        if not title:
+            continue
+        words = title.split()
+        if len(words) > MAX_QUERY_WORDS:
+            title = " ".join(words[:MAX_QUERY_WORDS])
+        if title.casefold() not in {item.casefold() for item in cleaned}:
+            cleaned.append(title)
+        if len(cleaned) >= max(0, max_titles):
+            break
+    return cleaned
+
+
 def _candidate_queries(profile, preferences: CandidatePreferences, reformulation_count: int, max_queries: int = 6) -> list[str]:
-    """Build bounded title-only queries from the human-selected role families."""
+    """Build bounded title-only queries from role families and user titles."""
+    max_queries = max(1, max_queries)
+    custom_titles = _clean_custom_titles(
+        preferences.additional_role_titles,
+        max_titles=max_queries,
+    )
     families = [family for family in preferences.primary_role_families if family in _ROLE_QUERIES]
     # Round-robin across selected families so a small global cap cannot starve
     # a user's secondary priority. In particular, the default six queries must
@@ -91,13 +113,23 @@ def _candidate_queries(profile, preferences: CandidatePreferences, reformulation
         if not added:
             break
         round_number += 1
+    # User-entered titles are explicit intent, so they get first slots while
+    # the selected families still provide deterministic similar-title coverage.
+    queries = custom_titles + queries
     if not queries:
         queries = ["Data Scientist"]
     if reformulation_count and len(queries) > 1:
         # A reformulation pass broadens via the remaining title families rather
         # than inventing a skill soup or relaxing the candidate's policy.
         queries = queries[reformulation_count % len(queries) :] + queries[: reformulation_count % len(queries)]
-    return list(dict.fromkeys(queries))[: max(1, max_queries)]
+    unique: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        key = query.casefold()
+        if key not in seen:
+            unique.append(query)
+            seen.add(key)
+    return unique[:max_queries]
 
 
 def _build_prompt(state: AgentState) -> str:

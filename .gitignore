@@ -27,6 +27,9 @@ data/candidate/
 # personal answers. They must stay local and outside Git.
 data/private/
 
+# Durable application tracker and generated asset manifests are local-only.
+data/applications/
+
 # OS
 .DS_Store
 

@@ -212,6 +212,23 @@ def test_default_candidate_queries_include_forward_deployed_roles():
     assert "Forward Deployed Engineer" in queries
 
 
+def test_custom_role_titles_are_bounded_and_prioritized():
+    from job_scout.graph.nodes.fetch_jobs import _candidate_queries
+
+    prefs = CandidatePreferences(
+        primary_role_families=["ai_ml"],
+        additional_role_titles=[
+            "  Forward-Deployed Engineer  ",
+            "AI Engineer",
+            "one two three four five six seven eight",
+        ],
+    )
+    queries = _candidate_queries(None, prefs, 0, max_queries=3)
+    assert queries[:2] == ["Forward-Deployed Engineer", "AI Engineer"]
+    assert len(queries) == 3
+    assert all(len(query.split()) <= 6 for query in queries)
+
+
 def test_candidate_search_does_not_filter_hybrid_or_onsite_when_all_modes_are_accepted(monkeypatch, sample_profile, sample_jobs):
     captured = []
 

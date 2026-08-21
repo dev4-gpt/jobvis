@@ -101,8 +101,8 @@ def test_render_tex_includes_selected_projects_and_clickable_links():
     tex = render_tex(cv, candidate_name="Jane")
     assert "Selected Projects" in tex
     assert r"Legal Document Analyzer" in tex
-    assert r"\href{https://portfolio.example/a\_b}{Portfolio}" in tex
-    assert r"\href{mailto:person@example.com}{Email}" in tex
+    assert r"\href{https://portfolio.example/a\_b}{\underline{Portfolio}}" in tex
+    assert r"\href{mailto:person@example.com}{\underline{Email}}" in tex
 
 
 def test_render_tex_preserves_visible_contact_metadata():

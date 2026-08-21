@@ -60,6 +60,7 @@ class BacktestReport:
     cover_letter_quality: CoverLetterQualityReport
     fabrication_report: FabricationReport
     missing_links: tuple[str, ...] = ()
+    failure_codes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -214,14 +215,27 @@ def backtest_pack(
         ),
     )
     failures = [failure for failure in quality.reasons]
+    failure_codes: list[str] = []
+    if quality.word_count < limits.min_letter_words or quality.word_count > limits.max_letter_words:
+        failure_codes.append("cover_letter_length")
+    if quality.evidence_matches < limits.min_evidence_matches:
+        failure_codes.append("cover_letter_evidence")
+    if quality.requirement_matches < limits.min_requirement_matches:
+        failure_codes.append("cover_letter_requirements")
+    if not quality.passed:
+        failure_codes.append("cover_letter_quality")
     if not grounding_ok:
+        failure_codes.append("fabrication")
         failures.append(f"fabrication rate {fabrication_rate:.3f} exceeds {limits.max_fabrication_rate:.3f}")
         failures.extend(flag.reason for flag in fabrication.flagged[:3])
     if not policy_ok:
+        failure_codes.append("policy_safety")
         failures.append("pack contains unconfirmed authorization, sponsorship, visa, or clearance claims")
     if missing_links:
+        failure_codes.append("source_links")
         failures.append(f"missing source links: {', '.join(missing_links)}")
     if not all(density_values):
+        failure_codes.append("cv_density")
         failures.append("CV density contract is not met")
     return BacktestReport(
         passed=all(metric.passed for metric in metrics),
@@ -231,6 +245,7 @@ def backtest_pack(
         cover_letter_quality=quality,
         fabrication_report=fabrication,
         missing_links=missing_links,
+        failure_codes=tuple(dict.fromkeys(failure_codes)),
     )
 
 

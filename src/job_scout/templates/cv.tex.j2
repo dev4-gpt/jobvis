@@ -23,16 +23,18 @@
 
 <% if cv.email or cv.phone %>
 \smallskip
-<% if cv.email %><< cv.email | tex >><% endif %><% if cv.email and cv.phone %> \\textbar{} <% endif %><% if cv.phone %><< cv.phone | tex >><% endif %>
+<% if cv.email %><< cv.email | tex >><% endif %><% if cv.email and cv.phone %> \textbar{} <% endif %><% if cv.phone %><< cv.phone | tex >><% endif %>
 <% endif %>
 
 <% if cv.links %>
 \smallskip
 <% for link in cv.links %>
-\href{<< link.url | urltex >>}{<< link.label | tex >>}<% if not loop.last %><% if loop.index % 5 == 0 %>\\
+\href{<< link.url | urltex >>}{\underline{<< link.label | tex >>}}<% if not loop.last %><% if loop.index % 5 == 0 %>\\
 <% else %> \textbar{} <% endif %><% endif %>
 <% endfor %>
 <% endif %>
+
+\par\smallskip
 
 \sectionrule{Summary}
 << cv.summary | tex >>
@@ -41,7 +43,7 @@
 \sectionrule{Experience}
 <% for entry in cv.experience %>
 \Needspace{5\baselineskip}
-{\bfseries << entry.role | tex >>} --- << entry.company | tex >><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
+{\bfseries\mbox{<< entry.role | heading >>}} --- << entry.company | tex >><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
 <% if entry.bullets %>
 \begin{itemize}
 <% for bullet in entry.bullets %>
@@ -56,7 +58,7 @@
 \sectionrule{Selected Projects}
 <% for entry in cv.projects %>
 \Needspace{5\baselineskip}
-{\bfseries << entry.role | tex >>}<% if entry.company %> --- << entry.company | tex >><% endif %><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
+{\bfseries\mbox{<< entry.role | heading >>}}<% if entry.company %> --- << entry.company | tex >><% endif %><% if entry.dates %> \hfill << entry.dates | tex >><% endif %>
 <% if entry.bullets %>
 \begin{itemize}
 <% for bullet in entry.bullets %>
@@ -69,7 +71,9 @@
 
 <% if cv.skills %>
 \sectionrule{Skills}
-<< cv.skills | map('ats') | join(' \\textbullet{} ') >>
+{\hyphenpenalty=10000\exhyphenpenalty=10000
+<% for skill in cv.skills %>\mbox{<< skill | ats >>}<% if not loop.last %>, <% endif %><% endfor %>
+}
 <% endif %>
 
 <% if cv.education %>

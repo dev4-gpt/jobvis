@@ -17,6 +17,8 @@ from job_scout.voice.bridge import VoiceRun
 
 def run_announcement(run: VoiceRun) -> str:
     """The 'System note' that makes Jobvis speak, unprompted, about a finished run."""
+    if run.cancelled:
+        return f"System note: the {run.kind} was cancelled. No late result was applied to the screen."
     if run.failed:
         return f"System note: the {run.kind} failed ({run.error or 'unknown error'}). Apologize briefly and suggest trying again."
     if run.kind == "search" and run.search_result is not None:

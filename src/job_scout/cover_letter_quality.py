@@ -50,6 +50,11 @@ _GENERIC = (
     "i believe i would be a great fit",
     "thank you for considering my application",
 )
+_MALFORMED_RESEARCH = re.compile(
+    r"\b(?:because it calls for about|calls for about|aims to be the source of truth|our mission is to)\b",
+    re.I,
+)
+_DUPLICATED_WORD = re.compile(r"\b([A-Za-z][A-Za-z'-]{2,})\s+\1\b", re.I)
 _REQUIREMENT_MARKERS = (
     "required",
     "must",
@@ -80,6 +85,17 @@ _GAP_LANGUAGE = re.compile(
     r"not yet demonstrated|would need to confirm|would confirm)\b",
     re.I,
 )
+_COMPANY_CONTEXT = re.compile(
+    r"^\s*(?:company\s+)?(?:overview|description|about\s+the\s+company)\b|" r"^\s*(?:mission|what\s+we\s+do|who\s+we\s+are)\b",
+    re.I,
+)
+
+_PDF_LIGATURES = str.maketrans({"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl"})
+
+
+def _normalize_pdf_text(text: str) -> str:
+    """Normalize ligatures emitted by PDF extraction before quality checks."""
+    return str(text).translate(_PDF_LIGATURES)
 
 
 def _words(text: str) -> list[str]:
@@ -91,7 +107,10 @@ def _sentences(text: str) -> list[str]:
 
 
 def _requirements(description: str) -> list[str]:
-    sentences = _sentences(description)
+    # Job feeds often prepend a company-marketing block to the actual
+    # requirements. It is context, not a candidate requirement, and must never
+    # become cover-letter prose or a quality-gate target.
+    sentences = [sentence for sentence in _sentences(description) if not _COMPANY_CONTEXT.search(sentence)]
     marked = [sentence for sentence in sentences if any(marker in sentence.lower() for marker in _REQUIREMENT_MARKERS)]
     if not marked:
         return sentences[:4]
@@ -102,7 +121,12 @@ def _requirements(description: str) -> list[str]:
     expanded: list[str] = []
     for sentence in marked:
         parts = re.split(r"\s+to\s+", sentence, maxsplit=1, flags=re.I)
-        if len(parts) == 2 and len(parts[0].split()) >= 4 and len(parts[1].split()) >= 3:
+        if (
+            len(parts) == 2
+            and len(parts[0].split()) >= 4
+            and len(parts[1].split()) >= 3
+            and "leverage their" not in sentence.lower()
+        ):
             expanded.extend((parts[0].strip(), f"to {parts[1].strip()}"))
         else:
             expanded.append(sentence)
@@ -122,6 +146,7 @@ def policy_claim_violations(
     clearance_status: str = "unknown",
 ) -> list[str]:
     """Find unconfirmed authorization or clearance claims in generated text."""
+    text = _normalize_pdf_text(text)
     violations: list[str] = []
     auth_known = authorization_status.lower() not in {"", "unknown", "unresolved", "pending"}
     sponsorship_known = sponsorship_policy.lower() not in {"", "unknown", "unresolved", "pending"}
@@ -177,10 +202,11 @@ def evaluate_cover_letter(
     """Return a reproducible quality report for one draft."""
     from job_scout.graph.schemas import CoverLetterQualityReport
 
-    normalized = re.sub(r"<[^>]+>", " ", str(letter)).strip()
+    normalized = _normalize_pdf_text(re.sub(r"<[^>]+>", " ", str(letter)).strip())
     word_count = len(re.findall(r"\b[\w][\w'-]*\b", normalized))
     reasons: list[str] = []
     generic_phrases = [phrase for phrase in _GENERIC if phrase in normalized.lower()]
+    malformed_research = bool(_MALFORMED_RESEARCH.search(normalized) or _DUPLICATED_WORD.search(normalized))
     if word_count < 250:
         reasons.append(f"cover letter is too short ({word_count} words; minimum is 250)")
     if word_count > 350:
@@ -189,6 +215,8 @@ def evaluate_cover_letter(
         reasons.append("cover letter is empty")
     if generic_phrases:
         reasons.append("cover letter contains generic or placeholder language")
+    if malformed_research:
+        reasons.append("cover letter contains duplicated or copied company-research phrasing")
 
     policy_violations = policy_claim_violations(
         normalized,
@@ -257,18 +285,51 @@ def grounded_fallback_letter(
         words = str(value).replace("\n", " ").split()
         return " ".join(words[:limit]).rstrip(" ,;:")
 
+    def evidence_fragment(value: str) -> str:
+        """Keep a copied evidence item readable when embedded in a sentence."""
+        return clip(value, 34).strip(" .;:")
+
     def clean_requirement(value: str) -> str:
         """Turn a job-board sentence into a readable clause without inventing facts."""
         text = re.sub(r"\s+", " ", str(value)).strip(" .;:")
+        # Job-board feeds sometimes prepend an About/mission heading to the
+        # first requirement. It is not a requirement and must not leak into
+        # employer-facing prose.
+        text = re.sub(r"^about\s+[^.]{1,100}\.\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^the\s+posting\s+emphasizes\s+", "", text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"^(?:the\s+)?(?:role|position|job|posting)\s+(?:calls for|emphasizes|requires|seeks|looks for)\s+",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        # Some job feeds accidentally turn a third-person sentence into a
+        # fragment such as "leverage their strong technical background ...".
+        # Keep the underlying requirement while restoring grammatical prose.
+        text = re.sub(
+            r"\bleverage\s+(?:their|the candidate's)\s+strong technical background and knowledge\s+and\s+to\s+",
+            "using a strong technical background to ",
+            text,
+            flags=re.IGNORECASE,
+        )
         text = re.sub(
             r"^(?:the\s+)?[A-Za-z][A-Za-z /-]{1,50}\s+(?:will|should|must|is expected to)\s+",
             "",
             text,
             flags=re.IGNORECASE,
         )
-        text = re.sub(r"\bstrong technical background and knowledge and to\b", "technical analysis to", text, flags=re.I)
         text = re.sub(r"\s+and\s+to\s+", " to ", text, flags=re.I)
-        return clip(text, 20).rstrip(" .;:") or "building reliable systems"
+        text = re.sub(
+            r"leverage their strong technical background and knowledge(?: and)? to interpret and analyze complex sets of data",
+            "use a strong technical background to interpret and analyze complex data",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(r"\bcomplex sets of data\b", "complex data", text, flags=re.IGNORECASE)
+        cleaned = clip(text, 20).rstrip(" .;:") or "building reliable systems"
+        if cleaned[:1].isupper() and not cleaned.isupper():
+            cleaned = cleaned[0].lower() + cleaned[1:]
+        return cleaned
 
     title = clip(job_title, 12) or "this role"
     employer = clip(company, 10) or "your team"
@@ -277,23 +338,26 @@ def grounded_fallback_letter(
     second_requirement = (
         clean_requirement(requirements[1]) if len(requirements) > 1 else "communicating technical results clearly"
     )
-    evidence = [clip(item, 34) for item in corpus_items if str(item).strip()]
+    evidence = [evidence_fragment(item) for item in corpus_items if str(item).strip()]
     evidence = evidence[:3]
     while len(evidence) < 3:
         evidence.append("My resume includes additional technical and project evidence relevant to this work")
 
     return (
         f"Dear {employer} hiring team,\n\n"
-        f"I am applying for the {title} role because the posting emphasizes {first_requirement} and "
-        f"{second_requirement}. That combination matches my experience turning data and model work into "
-        f"reproducible software and explaining results clearly. I am seeking a full-time opportunity and would "
-        f"welcome a conversation about how this evidence could support {employer}'s team.\n\n"
+        f"I am applying for the {title} role because it calls for {first_requirement} and {second_requirement}. "
+        f"My experience with measured model outcomes, data analysis, and reproducible software gives me a concrete "
+        f"foundation for that work. I am seeking a full-time opportunity and would welcome a conversation about how "
+        f"this evidence could support {employer}'s team.\n\n"
         f"My resume documents three relevant examples. First, {evidence[0]}. Second, {evidence[1]}. "
         f"Third, {evidence[2]}. Together, these projects and roles show hands-on work with model development, "
         f"data analysis, deployment, and technical problem solving. I would bring a measurement-first approach: "
         f"understand the data, evaluate failure cases, make the implementation reproducible, and communicate the "
         f"tradeoffs to the people using the result. That approach gives collaborators a clear basis for deciding "
-        f"what to improve next, especially when requirements or data quality are still evolving.\n\n"
+        f"what to improve next, especially when requirements or data quality are still evolving. I also value clear "
+        f"written communication, reproducible experiments, and practical collaboration when translating technical "
+        f"results into dependable product decisions for users and teammates. I am ready to learn the team's domain "
+        f"quickly and contribute with care.\n\n"
         f"I also want to be precise about fit. My resume does not document every domain-specific, authorization, "
         f"clearance, or production-scale requirement in the posting, so I would confirm those points directly with "
         f"the employer rather than make assumptions. The evidence above is the basis for my application, and I am "

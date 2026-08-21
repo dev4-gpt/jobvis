@@ -80,6 +80,21 @@ def latex_ats(text: str) -> str:
     return re.sub(r"(?<=[A-Z])(?=[A-Z])", r"\\kern-0.08em{}", escaped)
 
 
+def latex_heading(text: str) -> str:
+    """Escape a heading and compact the glyph pair known to split in PDFs."""
+    escaped = latex_escape(text)
+    return re.sub(r"\bVeloce\b", lambda _: r"\textmd{Veloce}", escaped)
+
+
+def latex_letter(text: str) -> str:
+    """Escape letter prose and compact only acronyms that split in PDFs."""
+    escaped = latex_escape(text)
+    for acronym in ("AWS", "FAISS", "RAG", "LLM"):
+        replacement = "\\kern-0.08em{}".join(acronym)
+        escaped = re.sub(rf"\b{acronym}\b", lambda _, value=replacement: value, escaped)
+    return escaped
+
+
 def _environment() -> Environment:
     """Jinja2 env with LaTeX-safe delimiters (``<< >>`` / ``<% %>``)."""
     env = Environment(
@@ -97,6 +112,8 @@ def _environment() -> Environment:
     env.filters["tex"] = latex_escape
     env.filters["urltex"] = latex_url
     env.filters["ats"] = latex_ats
+    env.filters["heading"] = latex_heading
+    env.filters["letter"] = latex_letter
     return env
 
 

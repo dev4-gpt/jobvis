@@ -44,7 +44,7 @@ const EMPTY_STATE: State = {
   jobs: [],
   pack: null,
   run: { running: false },
-  application: { job_id: "", url: "", status: "idle", message: "", ats: null, fields: [] },
+  application: { application_id: "", job_id: "", url: "", status: "idle", message: "", ats: null, fields: [] },
 };
 
 type Line = { role: string; text: string };

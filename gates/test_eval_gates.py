@@ -35,7 +35,10 @@ def opik_client():
 
     from job_scout.tracing import configure_opik
 
-    configure_opik()
+    try:
+        configure_opik()
+    except Exception as exc:  # noqa: BLE001 - offline CI must skip optional remote gates
+        pytest.skip(f"Opik is configured but unreachable: {type(exc).__name__}")
     return opik.Opik()
 
 
