@@ -193,18 +193,24 @@ class JSearchSource:
     # — measured spending its full timeout for zero jobs on every search, and
     # left in place deliberately so the codebase loop has a real bug to fix.
     # Do not quietly change it; see the release checklist in that doc.
-    def __init__(self, api_key: str = "", timeout: float = 15.0) -> None:
+    def __init__(self, api_key: str = "", timeout: float = 15.0, *, enabled: bool = True) -> None:
         self.api_key = api_key or get_settings().jsearch_api_key.get_secret_value()
         self.timeout = timeout
+        self.enabled = enabled
+        self._quota_exhausted = False
 
     @property
     def available(self) -> bool:
         """Whether an API key is configured."""
-        return bool(self.api_key)
+        return self.enabled and bool(self.api_key) and not self._quota_exhausted
 
     def fetch(self, query: str, location: str | None, country: str | None, remote: bool, limit: int) -> list[JobPosting]:
         """Fetch one page (10 results = 1 request credit; the free tier is small)."""
-        if not self.available:
+        if not self.enabled:
+            return _SourceFailure("disabled after HTTP 429 (quota exhausted)")
+        if self._quota_exhausted:
+            return _SourceFailure("HTTP 429 (quota exhausted)")
+        if not self.api_key:
             return []
         params: dict[str, object] = {
             "query": f"{query} in {location}" if location else query,
@@ -217,6 +223,14 @@ class JSearchSource:
             resp = httpx.get(self.BASE, params=params, headers={"X-API-Key": self.api_key}, timeout=self.timeout)
             resp.raise_for_status()
             data = resp.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429:
+                # A quota failure is a run-level circuit-breaker signal. The
+                # candidate search fans out across role titles, so continuing
+                # to call the exhausted provider only repeats noise and burns
+                # time before the other sources can answer.
+                self._quota_exhausted = True
+            return _failed("jsearch", exc)
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
             return _failed("jsearch", exc)
         payload = data.get("data")

@@ -119,6 +119,18 @@ def test_source_failure_names_a_rejected_key(respx_mock, caplog):
     assert "key rejected" in caplog.text
 
 
+def test_jsearch_quota_failure_stops_repeat_requests(respx_mock):
+    route = respx_mock.get("https://api.openwebninja.com/jsearch/search-v2").mock(
+        return_value=httpx.Response(429, json={"error": {"message": "Too Many Requests"}})
+    )
+    source = JSearchSource(api_key="k")
+    assert source.fetch("data scientist", "Anywhere in the United States", "us", False, 10) == []
+    second = source.fetch("applied ml engineer", "Anywhere in the United States", "us", False, 10)
+    assert second == []
+    assert getattr(second, "reason", "") == "HTTP 429 (quota exhausted)"
+    assert route.call_count == 1
+
+
 def test_detailed_diagnostics_preserve_source_failure_reason(respx_mock):
     respx_mock.get("https://api.openwebninja.com/jsearch/search-v2").mock(
         return_value=httpx.Response(429, json={"error": {"message": "Too Many Requests"}})

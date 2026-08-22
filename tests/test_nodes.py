@@ -192,7 +192,7 @@ def test_fetch_jobs_country_scope_overrides_model_location_and_remote(monkeypatc
 def test_fetch_jobs_uses_role_family_fanout_for_candidate_preferences(monkeypatch, sample_profile, sample_jobs):
     queries = []
 
-    def fake_run_search(query, location, country, remote, limit):
+    def fake_run_search(query, location, country, remote, limit, **kwargs):
         queries.append(query)
         return [sample_jobs[0].model_copy(update={"job_id": query, "title": query})], ["cache"]
 
@@ -251,7 +251,7 @@ def test_candidate_search_does_not_filter_hybrid_or_onsite_when_all_modes_are_ac
 def test_candidate_role_fanout_honors_global_job_cap(monkeypatch, sample_profile, sample_jobs):
     """Multiple role queries must not bypass the ranking budget."""
 
-    def fake_run_search(query, location, country, remote, limit):
+    def fake_run_search(query, location, country, remote, limit, **kwargs):
         return [
             sample_jobs[0].model_copy(
                 update={"job_id": f"{query}-{i}", "title": f"{query} {i}", "url": f"https://example.com/{query}/{i}"}

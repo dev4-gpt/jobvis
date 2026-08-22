@@ -207,6 +207,39 @@ def test_grounded_fallback_letter_removes_job_page_boilerplate():
     assert ".." not in letter
 
 
+def test_grounded_fallback_blocks_deepgram_marketing_and_long_evidence():
+    description = (
+        "More than 200,000 developers and 1,300 organizations build voice offerings that are Powered by Deepgram, "
+        "including Twilio, Cloudflare, Sierra, and Decagon, while Deepgram voice-native foundation models are accessed "
+        "through APIs. The role requires Python experience. Candidates must build machine learning systems."
+    )
+    letter = grounded_fallback_letter(
+        candidate_name="Person",
+        company="Deepgram",
+        job_title="Applied ML Engineer",
+        job_description=description,
+        corpus_items=[
+            (
+                "Integrated multiple AI workspaces including Claude, Hermes, Codex, OpenClaw, GLM, Kimi, Fusion, "
+                "local models, and specialized creative agents."
+            ),
+            (
+                "Analyzed attack transferability to a DenseNet-121 architecture, revealing that global perturbations "
+                "transfer effectively while localized patch attacks do not."
+            ),
+            (
+                "Created a council of seven specialized LLM agents that searches academic databases, debates findings, "
+                "and produces a peer-review-grade literature review."
+            ),
+        ],
+    )
+    report = evaluate_cover_letter(letter, description, " ".join(letter.split()))
+    assert report.passed
+    assert 275 <= report.word_count <= 325
+    assert "200,000" not in letter
+    assert "Powered by Deepgram" not in letter
+
+
 def test_cover_letter_quality_accepts_evidence_and_requirements():
     letter = (
         "Dear hiring team, I am applying because my work building Python data pipelines and evaluating scikit-learn models "

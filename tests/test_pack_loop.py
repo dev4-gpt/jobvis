@@ -96,6 +96,36 @@ def test_render_loop_withholds_then_repairs_overlength_letter(tmp_path: Path):
     assert result.manifest.pdfs_ready
 
 
+@pytest.mark.compile
+@pytest.mark.skipif(__import__("shutil").which("tectonic") is None, reason="tectonic binary not installed")
+def test_render_loop_repairs_deepgram_marketing_and_pdf_overlength(tmp_path: Path):
+    pack = _pack()
+    pack.cover_letter = (
+        "Dear Deepgram hiring team. More than 200,000 developers and 1,300 organizations use Powered by Deepgram. "
+        + "I built Python model evaluation and deployment systems. " * 70
+    )
+    description = (
+        "More than 200,000 developers and 1,300 organizations build voice offerings that are Powered by Deepgram, "
+        "including Twilio, Cloudflare, Sierra, and Decagon, while Deepgram voice-native foundation models are accessed "
+        "through APIs. The role requires Python experience. Candidates must build machine learning systems."
+    )
+    result = render_verified_pack(
+        pack,
+        candidate_name="Candidate",
+        source_text="Python model evaluation and deployment evidence. " * 180,
+        source_links=[CVLink(label="Portfolio", url="https://example.com", page=1)],
+        job_description=description,
+        company="Deepgram",
+        job_title="Applied ML Engineer",
+        out_dir=tmp_path,
+    )
+    assert result.report.passed
+    assert 250 <= result.report.cover_letter_words <= 350
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(str(result.cover_letter.pdf_path)).pages)
+    assert "200,000" not in text
+    assert "Powered by Deepgram" not in text
+
+
 def test_render_loop_stops_at_a_finite_budget(monkeypatch, tmp_path: Path):
     import job_scout.evals.pack_loop as loop
 

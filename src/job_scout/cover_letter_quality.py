@@ -89,6 +89,11 @@ _COMPANY_CONTEXT = re.compile(
     r"^\s*(?:company\s+)?(?:overview|description|about\s+the\s+company)\b|" r"^\s*(?:mission|what\s+we\s+do|who\s+we\s+are)\b",
     re.I,
 )
+_COMPANY_MARKETING = re.compile(
+    r"\b(?:more\s+than\s+[\d,]+|powered\s+by|voice-native|foundation\s+models?|"
+    r"our\s+customers?|trusted\s+by|million(?:s)?\s+of|billion(?:s)?\s+of)\b",
+    re.I,
+)
 
 _PDF_LIGATURES = str.maketrans({"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl"})
 _PREFERRED_MAX_WORDS = 325
@@ -111,7 +116,24 @@ def _requirements(description: str) -> list[str]:
     # Job feeds often prepend a company-marketing block to the actual
     # requirements. It is context, not a candidate requirement, and must never
     # become cover-letter prose or a quality-gate target.
-    sentences = [sentence for sentence in _sentences(description) if not _COMPANY_CONTEXT.search(sentence)]
+    sentences: list[str] = []
+    for sentence in _sentences(description):
+        if _COMPANY_CONTEXT.search(sentence):
+            continue
+        if _COMPANY_MARKETING.search(sentence):
+            # If a feed concatenates its company overview with a real
+            # requirement, keep only the clause beginning at the requirement
+            # marker. Otherwise discard the marketing sentence entirely.
+            marker = re.search(
+                r"\b(?:requires?|must|experience\s+with|ability\s+to|looking\s+for|seeking|responsible\s+for)\b",
+                sentence,
+                re.I,
+            )
+            if marker:
+                sentence = sentence[marker.start() :].strip()
+            else:
+                continue
+        sentences.append(sentence)
     marked = [sentence for sentence in sentences if any(marker in sentence.lower() for marker in _REQUIREMENT_MARKERS)]
     if not marked:
         return sentences[:4]
@@ -286,12 +308,6 @@ def grounded_fallback_letter(
         words = str(value).replace("\n", " ").split()
         return " ".join(words[:limit]).rstrip(" ,;:")
 
-    def evidence_fragment(value: str) -> str:
-        """Keep a copied evidence item readable when embedded in a sentence."""
-        # Leave headroom below the preferred 325-word ceiling after PDF
-        # extraction and punctuation normalization.
-        return clip(value, _PREFERRED_MAX_WORDS // 12 - 1).strip(" .;:")
-
     def clean_requirement(value: str) -> str:
         """Turn a job-board sentence into a readable clause without inventing facts."""
         text = re.sub(r"\s+", " ", str(value)).strip(" .;:")
@@ -341,7 +357,11 @@ def grounded_fallback_letter(
     second_requirement = (
         clean_requirement(requirements[1]) if len(requirements) > 1 else "communicating technical results clearly"
     )
-    evidence = [evidence_fragment(item) for item in corpus_items if str(item).strip()]
+    raw_evidence = [str(item).strip() for item in corpus_items if str(item).strip()]
+    # Leave headroom below the preferred 325-word target when source bullets
+    # are unusually long; ordinary evidence keeps the fuller 26-word excerpt.
+    evidence_limit = _PREFERRED_MAX_WORDS // 18 if any(len(item.split()) > 18 for item in raw_evidence) else 26
+    evidence = [clip(item, evidence_limit).strip(" .;:") for item in raw_evidence]
     evidence = evidence[:3]
     while len(evidence) < 3:
         evidence.append("My resume includes additional technical and project evidence relevant to this work")

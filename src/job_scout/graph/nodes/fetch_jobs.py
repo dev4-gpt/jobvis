@@ -18,7 +18,7 @@ from job_scout.config import get_settings
 from job_scout.graph.schemas import CandidatePreferences, JobPosting, SearchRequest, SourceDiagnostic
 from job_scout.graph.state import AgentState
 from job_scout.llm import ensure_budget, get_chat_model, model_chain, reasoning_kwargs, with_structured_output
-from job_scout.tools.jobs_api import location_to_country, search_jobs
+from job_scout.tools.jobs_api import JSearchSource, location_to_country, search_jobs
 from job_scout.tools.jobs_api import run_search_detailed as run_search
 
 # Per-fetch limit comes from settings (SCOUT_MAX_JOBS, default 10 — it drives
@@ -173,6 +173,21 @@ def fetch_jobs(state: AgentState) -> dict:
         all_jobs: list[JobPosting] = []
         all_sources: list[str] = []
         diagnostics_by_source: dict[str, SourceDiagnostic] = {}
+        previous_diagnostics = state.get("source_diagnostics") or []
+        jsearch_quota_exhausted = any(
+            diagnostic.source == "jsearch"
+            and diagnostic.error
+            and ("429" in diagnostic.error or "quota" in diagnostic.error.lower())
+            for diagnostic in previous_diagnostics
+        )
+        shared_jsearch = JSearchSource(enabled=not jsearch_quota_exhausted)
+        if jsearch_quota_exhausted:
+            diagnostics_by_source["jsearch"] = SourceDiagnostic(
+                source="jsearch",
+                requested=False,
+                completed=True,
+                error="HTTP 429 (quota exhausted; skipped for the rest of this run)",
+            )
 
         def search_role(query: str):
             location, country = _authoritative_location(profile)
@@ -182,6 +197,7 @@ def fetch_jobs(state: AgentState) -> dict:
                 country=country,
                 remote=_remote_only(preferences),
                 limit=max(3, settings.scout_max_jobs // 2),
+                jsearch=shared_jsearch,
             )
 
         # Role-family searches are independent. Keep the fan-out bounded so a
