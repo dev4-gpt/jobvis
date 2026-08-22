@@ -18,6 +18,7 @@ from job_scout.cover_letter_quality import (
     grounded_fallback_letter,
     policy_claim_violations,
     remove_unconfirmed_policy_sentences,
+    requirement_targets,
 )
 from job_scout.graph.schemas import CVContent, CVLink, JobPosting, RankedJob
 from job_scout.renderer import render_pdf, render_tex
@@ -113,6 +114,24 @@ def test_company_overview_is_not_a_requirement_target():
         "Built Python systems and evaluated models.",
     )
     assert all("Company Overview" not in target for target in report.requirement_targets)
+
+
+def test_requirement_targets_split_compressed_aggregator_clause():
+    targets = requirement_targets("The role requires Python experience and SQL skills for model evaluation.")
+    assert len(targets) >= 2
+    assert any("Python experience" in target for target in targets)
+    assert any("SQL skills" in target for target in targets)
+
+
+def test_requirement_targets_retain_responsibilities_after_company_copy():
+    targets = requirement_targets(
+        "More than 200,000 developers use the platform Powered by Deepgram. "
+        "You will build ML systems and collaborate with product teams."
+    )
+    assert len(targets) >= 2
+    assert all("200,000" not in target for target in targets)
+    assert any("build ML systems" in target for target in targets)
+    assert any("collaborate with product teams" in target for target in targets)
 
 
 def test_grounded_fallback_stays_inside_pdf_word_budget():

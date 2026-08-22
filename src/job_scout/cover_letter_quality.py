@@ -65,6 +65,11 @@ _REQUIREMENT_MARKERS = (
     "skills",
     "familiarity",
     "looking for",
+    "you will",
+    "will build",
+    "will develop",
+    "will collaborate",
+    "responsible for",
 )
 _AUTHORIZATION_CLAIM = re.compile(
     r"\b(?:authorized to work|eligible to work|work authorization|visa|citizenship|"
@@ -125,7 +130,7 @@ def _requirements(description: str) -> list[str]:
             # requirement, keep only the clause beginning at the requirement
             # marker. Otherwise discard the marketing sentence entirely.
             marker = re.search(
-                r"\b(?:requires?|must|experience\s+with|ability\s+to|looking\s+for|seeking|responsible\s+for)\b",
+                r"\b(?:requires?|must|experience\s+with|ability\s+to|looking\s+for|seeking|you\s+will|responsible\s+for)\b",
                 sentence,
                 re.I,
             )
@@ -136,7 +141,24 @@ def _requirements(description: str) -> list[str]:
         sentences.append(sentence)
     marked = [sentence for sentence in sentences if any(marker in sentence.lower() for marker in _REQUIREMENT_MARKERS)]
     if not marked:
-        return sentences[:4]
+        marked = sentences[:4]
+    if len(marked) < 2:
+        # Some aggregators flatten a requirements list into one sentence:
+        # "requires Python experience and SQL skills". Split only when both
+        # clauses are substantive, so the gate can require two real targets.
+        split_marked: list[str] = []
+        for sentence in marked:
+            parts = re.split(
+                r"\s+(?:and|or|as well as|along with)\s+(?!(?:knowledge|understanding|ability|to)\b)",
+                sentence,
+                maxsplit=1,
+                flags=re.I,
+            )
+            if len(parts) == 2 and " and to " not in sentence.lower() and all(len(part.split()) >= 3 for part in parts):
+                split_marked.extend(part.strip(" .;:") for part in parts)
+            else:
+                split_marked.append(sentence)
+        marked = split_marked
     # Job boards frequently compress two requirements into one clause such as
     # "work closely with platform teams to deliver generative AI solutions."
     # Keep both halves as separate targets so the letter can address them
