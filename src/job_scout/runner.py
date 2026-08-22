@@ -26,6 +26,7 @@ from job_scout.graph.schemas import (
     TailoringPack,
 )
 from job_scout.profile import extract_profile
+from job_scout.tools.cv_reader import CVReadError, extract_cv_document
 from job_scout.tracing import attach_cv, get_tracer, opik_url, trace_graph
 
 _PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
@@ -268,17 +269,30 @@ def _status_line(node_name: str, update: dict) -> str:
     return _NODE_STATUS.get(node_name, f"{node_name}…")
 
 
-def run_once(cv_text: str, *, cv_path: str | None = None, thread_id: str, tags: list[str]) -> RunResult:
+def run_once(
+    cv_text: str,
+    *,
+    cv_path: str | None = None,
+    cv_links: list[CVLink] | None = None,
+    thread_id: str,
+    tags: list[str],
+) -> RunResult:
     """Extract the profile then run the job search, returning the final result.
 
     Used by the batch runner, which starts from raw CV text.
     """
     profile = extract_profile(cv_text, thread_id=thread_id, tags=tags)
+    if cv_links is None and cv_path:
+        try:
+            _, cv_links = extract_cv_document(cv_path)
+        except CVReadError:
+            cv_links = []
     result = RunResult()
     for kind, payload in stream_search(
         profile,
         cv_text=cv_text,
         cv_path=cv_path,
+        cv_links=cv_links,
         thread_id=thread_id,
         tags=tags,
         preferences=CandidatePreferences(),

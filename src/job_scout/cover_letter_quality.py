@@ -91,6 +91,7 @@ _COMPANY_CONTEXT = re.compile(
 )
 
 _PDF_LIGATURES = str.maketrans({"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl"})
+_PREFERRED_MAX_WORDS = 325
 
 
 def _normalize_pdf_text(text: str) -> str:
@@ -287,7 +288,9 @@ def grounded_fallback_letter(
 
     def evidence_fragment(value: str) -> str:
         """Keep a copied evidence item readable when embedded in a sentence."""
-        return clip(value, 34).strip(" .;:")
+        # Leave headroom below the preferred 325-word ceiling after PDF
+        # extraction and punctuation normalization.
+        return clip(value, _PREFERRED_MAX_WORDS // 12 - 1).strip(" .;:")
 
     def clean_requirement(value: str) -> str:
         """Turn a job-board sentence into a readable clause without inventing facts."""

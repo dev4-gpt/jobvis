@@ -21,7 +21,7 @@ if str(ROOT / "src") not in sys.path:
 
 from job_scout.evals.pack_loop import render_verified_pack  # noqa: E402
 from job_scout.runner import run_once, stream_tailor  # noqa: E402
-from job_scout.tools.cv_reader import extract_cv_text  # noqa: E402
+from job_scout.tools.cv_reader import extract_cv_document  # noqa: E402
 from job_scout.voice import bridge as voice_bridge  # noqa: E402
 
 
@@ -39,14 +39,21 @@ def main() -> int:
         return 2
 
     thread_id = str(uuid4())
-    cv_text = extract_cv_text(args.cv)
-    search = run_once(cv_text, cv_path=str(args.cv), thread_id=thread_id, tags=["local-pack-e2e"])
+    cv_text, cv_links = extract_cv_document(args.cv)
+    search = run_once(
+        cv_text,
+        cv_path=str(args.cv),
+        cv_links=cv_links,
+        thread_id=thread_id,
+        tags=["local-pack-e2e"],
+    )
     report: dict[str, object] = {
         "thread_id": thread_id,
         "cv": str(args.cv),
         "search_failed": search.failed,
         "search_error": search.error_message,
         "ranked_jobs": len(search.ranked_jobs),
+        "source_links": len(cv_links),
     }
     if search.failed or not search.ranked_jobs:
         rendered = json.dumps(report, indent=2, sort_keys=True)
@@ -76,13 +83,14 @@ def main() -> int:
         result.pack,
         candidate_name=search.profile.name if search.profile else "Candidate",
         source_text=cv_text,
-        source_links=list(values.get("cv_links") or []),
+        source_links=list(values.get("cv_links") or cv_links),
         job_description=selected.job.description,
         company=selected.job.company,
         job_title=selected.job.title,
         out_dir=Path(directory),
         selected_job_id=selected.job.job_id,
         generation_id=thread_id,
+        backtest_score=result.backtest_score,
     )
     report.update(
         {

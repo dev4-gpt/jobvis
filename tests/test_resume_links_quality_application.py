@@ -226,6 +226,17 @@ def test_cover_letter_quality_accepts_evidence_and_requirements():
     assert report.requirement_matches >= 2
 
 
+def test_cover_letter_quality_keeps_the_hard_pdf_ceiling_at_350_words():
+    report = evaluate_cover_letter(
+        "Dear team. " + "Python evidence experience. " * 120,
+        "Python experience required. Model evaluation required.",
+        "Built Python systems and evaluated models.",
+    )
+    assert report.word_count > 350
+    assert report.passed is False
+    assert any("maximum is 350" in reason for reason in report.reasons)
+
+
 @pytest.mark.parametrize(
     ("url", "expected"),
     [

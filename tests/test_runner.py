@@ -9,6 +9,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import job_scout.runner as runner_mod
+from job_scout.graph.schemas import CVLink
 from job_scout.runner import _friendly_provider_error, run_once, stream_search, stream_tailor
 
 
@@ -46,6 +47,17 @@ def test_search_passes_profile_and_nulls_selected_job_id(monkeypatch, sample_pro
     assert fake.captured_inputs["selected_job_id"] is None
     assert fake.updated_state["ranked_jobs"] == []
     assert fake.updated_state["selected_job_id"] is None
+
+
+def test_run_once_forwards_resume_links_into_the_search_checkpoint(monkeypatch, sample_profile):
+    fake = _FakeGraph()
+    _patch(monkeypatch, fake)
+    monkeypatch.setattr(runner_mod, "extract_profile", lambda *a, **k: sample_profile)
+    links = [CVLink(label="Portfolio", url="https://example.com", page=1)]
+
+    run_once("cv text here", cv_links=links, thread_id="t1", tags=["batch"])
+
+    assert fake.captured_inputs["cv_links"] == links
 
 
 def test_stream_search_yields_result(monkeypatch, sample_profile):
