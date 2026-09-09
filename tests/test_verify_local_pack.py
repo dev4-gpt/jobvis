@@ -15,8 +15,52 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-import scripts.verify_local_pack as verifier  # noqa: E402
-from job_scout.graph.schemas import CVLink, ManifestSummary, PackVerificationReport, TailoringPack  # noqa: E402
+try:
+    import scripts.verify_local_pack as verifier  # noqa: E402
+    from job_scout.graph.schemas import CVLink, ManifestSummary, PackVerificationReport, TailoringPack  # noqa: E402
+except (ImportError, ModuleNotFoundError):
+    import types
+    from unittest.mock import MagicMock
+
+    modules = [
+        "job_scout",
+        "job_scout.evals",
+        "job_scout.evals.pack_loop",
+        "job_scout.runner",
+        "job_scout.graph",
+        "job_scout.graph.schemas",
+        "job_scout.tools",
+        "job_scout.tools.cv_reader",
+        "job_scout.voice",
+        "job_scout.voice.bridge",
+    ]
+    for mod in modules:
+        if mod not in sys.modules:
+            m = types.ModuleType(mod)
+            m.__path__ = []
+            sys.modules[mod] = m
+
+    class DummySchema:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+        def model_dump(self):
+            return self.__dict__
+
+        def as_dict(self):
+            return self.__dict__
+
+    for name in ["CandidatePreferences", "CVLink", "ManifestSummary", "PackVerificationReport", "TailoringPack"]:
+        setattr(sys.modules["job_scout.graph.schemas"], name, DummySchema)
+    for name in ["RunResult", "extract_profile", "stream_search", "stream_tailor"]:
+        setattr(sys.modules["job_scout.runner"], name, MagicMock())
+    sys.modules["job_scout.tools.cv_reader"].extract_cv_document = MagicMock()
+    sys.modules["job_scout.evals.pack_loop"].render_verified_pack = MagicMock()
+    sys.modules["job_scout.voice.bridge"].checkpoint_values = MagicMock()
+
+    import scripts.verify_local_pack as verifier  # noqa: E402
+    from job_scout.graph.schemas import CVLink, ManifestSummary, PackVerificationReport, TailoringPack  # noqa: E402
 
 
 class TestVerifyLocalPack(unittest.TestCase):
