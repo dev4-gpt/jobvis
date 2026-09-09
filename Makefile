@@ -127,10 +127,10 @@ backtest: ## Run the deterministic application-pack backtest (CV= PACK= JOB=)
 	$(UV_RUN) python scripts/backtest_pack.py --cv "$(CV)" --pack "$(PACK)" --job-description "$(JOB)" $(if $(OUTPUT),--output "$(OUTPUT)",)
 
 .PHONY: pack-e2e
-pack-e2e: ## Run one provider-backed local search→tailor→PDF audit (CV=, YES=1)
+pack-e2e: ## Run one provider-backed local search→tailor→PDF audit (CV=, YES=1, TIMEOUT=)
 	@test -n "$(CV)" || (echo "Usage: make pack-e2e CV=/path/to/resume.pdf YES=1"; exit 2)
 	@test "$(YES)" = "1" || (echo "This uses configured providers. Re-run with YES=1 to execute."; exit 2)
-	$(UV_RUN) python scripts/verify_local_pack.py --cv "$(CV)" --yes $(if $(OUTPUT),--output "$(OUTPUT)",)
+	$(UV_RUN) python scripts/verify_local_pack.py --cv "$(CV)" --yes $(if $(OUTPUT),--output "$(OUTPUT)",) $(if $(TIMEOUT),--timeout "$(TIMEOUT)",)
 
 .PHONY: pack-audit
 pack-audit: ## Audit downloaded PDFs and preserved links (ORIGINAL_CV= TAILORED_CV= JOB= COVER_LETTER_PDF=|COVER_LETTER_TEXT=)
