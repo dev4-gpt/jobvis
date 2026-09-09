@@ -34,6 +34,7 @@ JobSourceName = Literal[
     "flexjobs",
     "instahyre",
     "protocol_jobs_ai",
+    "apify",
     "manual",
 ]
 EligibilityStatus = Literal["eligible", "borderline", "blocked"]

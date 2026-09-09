@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     opik_enabled: bool = Field(default=True, alias="OPIK_ENABLED")
 
     jsearch_api_key: SecretStr = Field(default=SecretStr(""), alias="JSEARCH_API_KEY")
+    apify_api_token: SecretStr = Field(default=SecretStr(""), alias="APIFY_API_TOKEN")
     adzuna_app_id: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_ID")
     adzuna_app_key: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_KEY")
     greenhouse_board_tokens: str = Field(default="", alias="GREENHOUSE_BOARD_TOKENS")
