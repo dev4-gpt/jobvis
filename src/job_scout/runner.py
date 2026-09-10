@@ -232,6 +232,9 @@ def stream_tailor(
     config = {"configurable": {"thread_id": thread_id}, "callbacks": callbacks, "recursion_limit": 25}
 
     result = TailorResult(opik_url=opik_url())
+    from job_scout.application.handoff import HandoffStore
+
+    HandoffStore().invalidate(selected_job_id)
     start = time.monotonic()
     try:
         for chunk in graph.stream(inputs, config=config, stream_mode="updates"):

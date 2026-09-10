@@ -776,6 +776,13 @@ def tailor(state: AgentState) -> dict:
         return {"tailoring": None, "errors": errors, "tailor_issue_codes": [], "tailor_backtest_score": None}
 
     research = research_company(ranked.job.company) if settings.has_tavily else None
+    from job_scout.memory.service import MemoryService, candidate_key
+
+    memory_context = ""
+    try:
+        memory_context = MemoryService(candidate_key(state.get("cv_text", ""), profile.name or "")).grounded_context(corpus)
+    except Exception:
+        errors.append("tailor: encrypted memory unavailable; using the current resume corpus")
 
     # llm_calls is checkpoint-cumulative, so on a shared thread the budget
     # effectively spans search + tailor invocations. Documented, not redesigned.
@@ -789,7 +796,8 @@ def tailor(state: AgentState) -> dict:
         research_rule=RESEARCH_RULE if research else "",
         profile=_render_profile(profile),
         candidate_preferences=_render_preferences(state.get("candidate_preferences")),
-        corpus=corpus.render_for_prompt(),
+        corpus=corpus.render_for_prompt()
+        + ("\nConfirmed current-resume highlights:\n" + memory_context if memory_context else ""),
         job=_render_job(ranked),
         persona=resume_persona(ranked.job),
         research=research or "none",

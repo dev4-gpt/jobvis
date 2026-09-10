@@ -7,9 +7,12 @@ Exports approved Jobvis application packs into the standardized AIHawk queue for
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from jsonschema import Draft7Validator, FormatChecker
 
 
 def format_aihawk_job(
@@ -32,12 +35,10 @@ def format_aihawk_job(
     elif not str_id:
         str_id = "001"
 
-    # Normalize score to 0.0 - 5.0 scale
-    # If score was on 0-100 scale, map to 0-5
-    normalized_score = float(score)
-    if normalized_score > 5.0:
-        normalized_score = round(normalized_score / 20.0, 2)
-    normalized_score = max(0.0, min(5.0, round(normalized_score, 2)))
+    # This boundary accepts Jobvis scores only, always 0–100.
+    if not math.isfinite(float(score)) or not 0 <= score <= 100:
+        raise ValueError("Jobvis score must be finite and between 0 and 100")
+    normalized_score = round(float(score) / 20.0, 2)
 
     resolved_pdf = str(Path(pdf_path).resolve()) if pdf_path else None
     resolved_report = str(Path(report_path).resolve()) if report_path else None
@@ -70,9 +71,9 @@ def export_aihawk_queue(
 
     for idx, pack in enumerate(packs, start=1):
         job_id = pack.get("id", idx)
-        company = pack.get("company", pack.get("company_name", "Unknown Company"))
-        role = pack.get("role", pack.get("job_title", "Software Engineer"))
-        score = float(pack.get("score", pack.get("fit_score", 4.0)))
+        company = pack["company"]
+        role = pack["role"]
+        score = float(pack["score"])
         job_url = pack.get("job_url", pack.get("url", pack.get("application_url")))
         pdf_path = pack.get("pdf_path", pack.get("tailored_cv_pdf_path"))
         report_path = pack.get("report_path")
@@ -107,7 +108,16 @@ def export_aihawk_queue(
     if output_path:
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "w", encoding="utf-8") as f:
-            json.dump(queue_doc, f, indent=2)
+        from job_scout.application.handoff import atomic_json
+
+        validate_queue(queue_doc)
+        atomic_json(out, queue_doc)
+
+    validate_queue(queue_doc)
 
     return queue_doc
+
+
+def validate_queue(document: dict) -> None:
+    schema = json.loads(Path(__file__).with_name("aihawk-queue.schema.json").read_text(encoding="utf-8"))
+    Draft7Validator(schema, format_checker=FormatChecker()).validate(document)

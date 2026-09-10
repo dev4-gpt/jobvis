@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
+from threading import Lock
 from typing import Any
+from urllib.parse import urlsplit
 
 try:
     import httpx
@@ -54,6 +58,75 @@ APPLY_PATTERNS = [
 ]
 
 MIN_CONTENT_CHARS = 300
+_CACHE: dict[str, tuple[float, dict]] = {}
+_CACHE_LOCK = Lock()
+_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="job-liveness")
+
+
+def valid_job_url(url: str) -> bool:
+    """Only absolute public HTTP URLs belong in application handoffs."""
+    import ipaddress
+
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname or ""
+        if parsed.scheme not in {"https", "http"} or not host or parsed.username or parsed.password:
+            return False
+        if host == "localhost" or host.endswith((".local", ".localhost", ".internal")):
+            return False
+        try:
+            return ipaddress.ip_address(host).is_global
+        except ValueError:
+            return "." in host
+    except ValueError:
+        return False
+
+
+def verified_liveness(url: str, *, force: bool = False) -> dict:
+    now = time.time()
+    with _CACHE_LOCK:
+        cached = _CACHE.get(url)
+        if not force and cached and now - cached[0] < 900:
+            return dict(cached[1])
+    if not valid_job_url(url):
+        result = {"liveness": "uncertain", "reason": "Missing or unsupported public job URL", "url": url}
+    else:
+        result = check_job_liveness(url, timeout=8)
+    result["checked_at"] = now
+    with _CACHE_LOCK:
+        if len(_CACHE) >= 2000:
+            _CACHE.clear()
+        _CACHE[url] = (now, result)
+    return dict(result)
+
+
+def filter_live_jobs(jobs: list, diagnostics: list | None = None, *, budget: float = 15.0) -> list:
+    """Bounded shared verification stage; unfinished candidates remain visible."""
+    pending = {}
+    for job in jobs:
+        url = job.application_url or job.url
+        if url not in pending:
+            pending[url] = _POOL.submit(verified_liveness, url)
+    done, unfinished = wait(pending.values(), timeout=budget)
+    for future in unfinished:
+        future.cancel()
+    kept = []
+    for job in jobs:
+        future = pending[job.application_url or job.url]
+        result = {"liveness": "uncertain", "reason": "Verification stage deadline reached"}
+        if future in done:
+            try:
+                result = future.result()
+            except Exception:
+                result = {"liveness": "uncertain", "reason": "Verification unavailable"}
+        job = job.model_copy(update={"liveness": result})
+        for diagnostic in diagnostics or []:
+            if diagnostic.source == job.source:
+                diagnostic.expired += int(result["liveness"] == "expired")
+                diagnostic.incomplete_checks += int(result["liveness"] == "uncertain")
+        if result["liveness"] != "expired":
+            kept.append(job)
+    return kept
 
 
 def classify_liveness(
@@ -65,6 +138,8 @@ def classify_liveness(
     """Classifies whether a job listing is active, expired, or uncertain."""
     if status_code in (404, 410):
         return {"status": "expired", "reason": f"HTTP {status_code}"}
+    if status_code < 200 or status_code >= 400:
+        return {"status": "uncertain", "reason": f"HTTP {status_code}; could not verify listing"}
 
     for pattern in EXPIRED_URL_PATTERNS:
         if pattern.search(final_url):
@@ -74,6 +149,10 @@ def classify_liveness(
         match = pattern.search(body_text)
         if match:
             return {"status": "expired", "reason": f"pattern matched: {pattern.pattern}"}
+
+    for pattern in LISTING_PAGE_PATTERNS:
+        if pattern.search(body_text):
+            return {"status": "expired", "reason": "redirected to general search page"}
 
     controls = apply_controls or []
     has_apply = False
@@ -98,7 +177,7 @@ def classify_liveness(
             return {"status": "expired", "reason": f"redirected to general search page: {pattern.pattern}"}
 
     if len(body_text.strip()) < MIN_CONTENT_CHARS:
-        return {"status": "expired", "reason": "insufficient content (empty page or shell)"}
+        return {"status": "uncertain", "reason": "insufficient content (empty page or JavaScript shell)"}
 
     return {"status": "uncertain", "reason": "content present but no explicit apply control found"}
 
@@ -137,7 +216,8 @@ def check_job_liveness(
     try:
         response = http_client.get(url)
         raw_text = response.text
-        clean_text = re.sub(r"<[^>]+>", " ", raw_text)
+        visible_text = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ", raw_text, flags=re.IGNORECASE | re.DOTALL)
+        clean_text = re.sub(r"<[^>]+>", " ", visible_text)
         clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
         button_matches = re.findall(

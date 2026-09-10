@@ -15,52 +15,8 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-try:
-    import scripts.verify_local_pack as verifier  # noqa: E402
-    from job_scout.graph.schemas import CVLink, ManifestSummary, PackVerificationReport, TailoringPack  # noqa: E402
-except (ImportError, ModuleNotFoundError):
-    import types
-    from unittest.mock import MagicMock
-
-    modules = [
-        "job_scout",
-        "job_scout.evals",
-        "job_scout.evals.pack_loop",
-        "job_scout.runner",
-        "job_scout.graph",
-        "job_scout.graph.schemas",
-        "job_scout.tools",
-        "job_scout.tools.cv_reader",
-        "job_scout.voice",
-        "job_scout.voice.bridge",
-    ]
-    for mod in modules:
-        if mod not in sys.modules:
-            m = types.ModuleType(mod)
-            m.__path__ = []
-            sys.modules[mod] = m
-
-    class DummySchema:
-        def __init__(self, **kwargs):
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-
-        def model_dump(self):
-            return self.__dict__
-
-        def as_dict(self):
-            return self.__dict__
-
-    for name in ["CandidatePreferences", "CVLink", "ManifestSummary", "PackVerificationReport", "TailoringPack"]:
-        setattr(sys.modules["job_scout.graph.schemas"], name, DummySchema)
-    for name in ["RunResult", "extract_profile", "stream_search", "stream_tailor"]:
-        setattr(sys.modules["job_scout.runner"], name, MagicMock())
-    sys.modules["job_scout.tools.cv_reader"].extract_cv_document = MagicMock()
-    sys.modules["job_scout.evals.pack_loop"].render_verified_pack = MagicMock()
-    sys.modules["job_scout.voice.bridge"].checkpoint_values = MagicMock()
-
-    import scripts.verify_local_pack as verifier  # noqa: E402
-    from job_scout.graph.schemas import CVLink, ManifestSummary, PackVerificationReport, TailoringPack  # noqa: E402
+import scripts.verify_local_pack as verifier  # noqa: E402
+from job_scout.graph.schemas import CVContent, CVLink, TailoringPack  # noqa: E402
 
 
 class TestVerifyLocalPack(unittest.TestCase):
@@ -94,7 +50,7 @@ class TestVerifyLocalPack(unittest.TestCase):
 
     def test_successful_flow_with_phases_and_report(self) -> None:
         out_json = self.tmp_path / "output.json"
-        mock_profile = SimpleNamespace(name="Candidate Dev", target_role="AI Engineer")
+        mock_profile = SimpleNamespace(name="Candidate Dev", primary_roles=["AI Engineer"])
         mock_job = SimpleNamespace(job_id="job-123", title="AI Engineer", company="Acme AI", description="Build AI.")
         mock_ranked_job = SimpleNamespace(job=mock_job)
         mock_search = SimpleNamespace(
@@ -105,19 +61,13 @@ class TestVerifyLocalPack(unittest.TestCase):
         )
 
         mock_tailor_result = SimpleNamespace(
-            pack=TailoringPack(),
+            pack=TailoringPack(cv=CVContent(headline="AI Engineer", summary="Grounded summary"), cover_letter="Test letter"),
             backtest_score=0.95,
             error_message="",
         )
 
-        mock_manifest = ManifestSummary(
-            job_id="job-123",
-            company="Acme AI",
-            job_title="AI Engineer",
-            status="ready",
-            pdfs_ready=True,
-        )
-        mock_report = PackVerificationReport(passed=True, issues=[])
+        mock_manifest = SimpleNamespace(as_dict=lambda: {"job_id": "job-123", "status": "ready", "pdfs_ready": True})
+        mock_report = SimpleNamespace(passed=True, issues=[])
         mock_verified_pack = SimpleNamespace(manifest=mock_manifest, report=mock_report)
 
         with (
@@ -129,7 +79,7 @@ class TestVerifyLocalPack(unittest.TestCase):
             patch.object(
                 verifier,
                 "extract_cv_document",
-                return_value=("Candidate CV text", [CVLink(label="Portfolio", url="https://example.com")]),
+                return_value=("Candidate CV text", [CVLink(label="Portfolio", url="https://example.com", page=1)]),
             ),
             patch.object(verifier, "extract_profile", return_value=mock_profile),
             patch.object(

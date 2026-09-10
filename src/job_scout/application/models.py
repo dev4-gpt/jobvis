@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import uuid4
 
@@ -17,6 +17,7 @@ ApplicationStatus = Literal[
     "safe_fields_filled",
     "final_review",
     "submitted_by_user",
+    "interview",
 ]
 
 
@@ -59,6 +60,10 @@ class ApplicationRecord(BaseModel):
     source: str = ""
     status: ApplicationStatus = "discovered"
     asset_manifest_id: str = ""
+    submitted_at: str | None = None
+    interviewed_at: str | None = None
+    followup_due: list[str] = Field(default_factory=list)
+    thank_you_due: str | None = None
     events: list[ApplicationEvent] = Field(default_factory=list)
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
@@ -67,3 +72,10 @@ class ApplicationRecord(BaseModel):
         self.status = status
         self.updated_at = now_iso()
         self.events.append(ApplicationEvent(name=status, detail=detail))
+        if status == "submitted_by_user" and self.submitted_at is None:
+            self.submitted_at = self.updated_at
+            submitted = datetime.fromisoformat(self.submitted_at)
+            self.followup_due = [(submitted + timedelta(days=days)).isoformat() for days in (7, 14)]
+        if status == "interview" and self.interviewed_at is None:
+            self.interviewed_at = self.updated_at
+            self.thank_you_due = (datetime.fromisoformat(self.interviewed_at) + timedelta(hours=24)).isoformat()

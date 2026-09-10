@@ -89,7 +89,7 @@ def main() -> int:
         log_phase("search_and_rank", "Extracting profile and searching/ranking jobs across configured sources...")
         profile = extract_profile(cv_text, thread_id=thread_id, tags=["local-pack-e2e"])
         if profile and profile.name:
-            print(f"  → Candidate profile: {profile.name} ({profile.target_role or 'general'})", flush=True)
+            print(f"  → Candidate profile: {profile.name} ({', '.join(profile.primary_roles) or 'general'})", flush=True)
 
         search: RunResult | None = None
         for kind, payload in stream_search(

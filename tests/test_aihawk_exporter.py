@@ -15,7 +15,7 @@ from job_scout.tools.aihawk_exporter import export_aihawk_queue, format_aihawk_j
 
 class TestAIHawkExporter(unittest.TestCase):
     def test_format_aihawk_job_zero_pads_id(self):
-        job = format_aihawk_job(job_id=7, company="Anthropic", role="AI Safety Engineer", score=4.5)
+        job = format_aihawk_job(job_id=7, company="Anthropic", role="AI Safety Engineer", score=90)
         self.assertEqual(job["id"], "007")
         self.assertEqual(job["company"], "Anthropic")
         self.assertEqual(job["score"], 4.5)
@@ -31,7 +31,7 @@ class TestAIHawkExporter(unittest.TestCase):
                 "id": 1,
                 "company": "Anthropic",
                 "role": "Staff AI Engineer",
-                "score": 4.8,
+                "score": 96,
                 "job_url": "https://boards.greenhouse.io/anthropic/jobs/123",
                 "pdf_path": "/tmp/anthropic_cv.pdf",
                 "notes": "Verified high match",
@@ -40,7 +40,7 @@ class TestAIHawkExporter(unittest.TestCase):
                 "id": 2,
                 "company": "Legacy Corp",
                 "role": "Legacy Analyst",
-                "score": 2.0,  # Below threshold
+                "score": 40,  # Below threshold
                 "job_url": "https://example.com/jobs/456",
             },
         ]

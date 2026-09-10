@@ -108,6 +108,7 @@ class JobPosting(BaseModel):
     """A single job opening, normalized across all sources."""
 
     job_id: str
+    liveness: dict | None = None
     title: str
     company: str
     location: str
@@ -163,6 +164,8 @@ class SourceDiagnostic(BaseModel):
     returned: int = 0
     contributed: bool = False
     error: str | None = None
+    expired: int = 0
+    incomplete_checks: int = 0
 
 
 class JobScore(BaseModel):

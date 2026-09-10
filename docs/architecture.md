@@ -1,5 +1,28 @@
 # Job Scout — Architecture
 
+## Connected Jobvis integrations
+
+```mermaid
+flowchart LR
+  Registry[Curated ATS registry] --> Boards[Direct board adapters and shared cache]
+  Search[Ordinary search] --> Live[Bounded listing checks]
+  Boards --> Live
+  Expand[Manual Apify expansion] --> Live
+  Live --> Rank[Candidate policy and ranking]
+  Rank --> Tailor[Resume-grounded tailoring]
+  Memory[Encrypted confirmed memory] -->|Exact current-corpus highlights| Tailor
+  Memory --> Suggestions[Reviewed answer suggestions]
+  Tailor --> Audit[PDF and grounding audit]
+  Audit --> Review[Explicit snapshot approval]
+  Review --> Export[Durable schema-validated AIHawk bundle]
+  Tracker[User-recorded submission and interview] --> Due[Local follow-up dates]
+```
+
+The console exposes these actions through the existing FastAPI application. An export does
+not invoke a worker or mark an application submitted. See [integration plan](integrations-plan.md)
+for configuration, contracts and compatibility, and [acceptance](integration-acceptance.md)
+for verified behavior and live-service limits. The original graph architecture follows.
+
 ![Job Scout architecture](images/architecture_part2.png)
 
 Grounded in the current code (`src/job_scout/…`). Renders anywhere Mermaid is

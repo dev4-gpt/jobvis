@@ -58,6 +58,12 @@ class ApplicationController:
     def open(self, ranked: RankedJob, profile: Profile, links: list[CVLink]) -> dict:
         listing_url = ranked.job.listing_url or ranked.job.source_url or ranked.job.url
         application_url = ranked.job.application_url or ranked.job.url or listing_url
+        from job_scout.config import get_settings
+        from job_scout.tools.liveness import verified_liveness
+
+        if get_settings().liveness_enabled and verified_liveness(application_url, force=True)["liveness"] == "expired":
+            self.state = ApplicationState(status="blocked", message="This posting is confirmed expired.")
+            return self.state.public()
         if not application_url:
             self.state = ApplicationState(status="blocked", message="This job has no application URL.")
             return self.state.public()

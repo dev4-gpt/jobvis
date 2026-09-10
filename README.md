@@ -48,6 +48,12 @@ git clone --branch part4.0 https://github.com/jamwithai/observable-job-agent
 
 ## 🚀 Quick start
 
+The connected Jobvis integrations (curated discovery, manual Apify expansion, encrypted
+local memory, and reviewed AIHawk export) are described in
+[configuration and implementation](docs/integrations-plan.md) and the
+[verification record](docs/integration-acceptance.md). Live services require separate configuration;
+AIHawk is not launched automatically.
+
 Prerequisites: **Python 3.12** (the project pins `>=3.12,<3.13`) and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**. The voice console also needs **Node 20+**.
 
 ```bash

@@ -23,6 +23,7 @@ dependencies = [
     "fpdf2>=2.8",
     "jinja2>=3.1",
     "pyyaml>=6",
+    "jsonschema>=4",
 ]
 
 [dependency-groups]
@@ -56,6 +57,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/job_scout"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"data/portals.yml" = "job_scout/data/portals.yml"
 
 [tool.ruff]
 line-length = 130

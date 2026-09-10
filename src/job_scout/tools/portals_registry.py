@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 try:
     import yaml
@@ -100,6 +101,8 @@ class PortalsRegistry:
             # Default to data/portals.yml relative to project root
             base_dir = Path(__file__).resolve().parent.parent.parent.parent
             config_path = base_dir / "data" / "portals.yml"
+            if not config_path.exists():
+                config_path = Path(__file__).resolve().parent.parent / "data" / "portals.yml"
 
         self.config_path = Path(config_path)
         self.data: dict[str, Any] = self._load_config()
@@ -131,6 +134,29 @@ class PortalsRegistry:
         """Returns companies that provide direct Greenhouse board API endpoints."""
         companies = self.get_tracked_companies(enabled_only=enabled_only)
         return [c for c in companies if c.get("api") and "greenhouse" in str(c.get("api", ""))]
+
+    def board_tokens(self, source: str) -> list[str]:
+        """Extract public ATS board identifiers from enabled companies."""
+        tokens = []
+        for company in self.get_tracked_companies():
+            for value in (company.get("api", ""), company.get("careers_url", "")):
+                url = urlsplit(str(value))
+                parts = url.path.strip("/").split("/")
+                token = ""
+                if source == "greenhouse" and url.hostname == "boards-api.greenhouse.io" and len(parts) >= 4:
+                    token = parts[2] if parts[:2] == ["v1", "boards"] else ""
+                elif (
+                    source == "greenhouse"
+                    and url.hostname in {"boards.greenhouse.io", "job-boards.greenhouse.io"}
+                    or source == "lever"
+                    and url.hostname == "jobs.lever.co"
+                    or source == "ashby"
+                    and url.hostname == "jobs.ashbyhq.com"
+                ):
+                    token = parts[0]
+                if token and re.fullmatch(r"[\w.-]+", token) and token not in tokens:
+                    tokens.append(token)
+        return tokens
 
     def filter_title(self, title: str) -> bool:
         """Determines if a job title passes the positive and negative keyword filters."""

@@ -315,11 +315,12 @@ def test_ats_detection_and_safe_mapping(url, expected):
 
 
 def test_sensitive_answers_require_consent_and_are_not_auto_reused(monkeypatch, tmp_path):
-    import job_scout.application.answers as answers_module
+    from cryptography.fernet import Fernet
 
-    saved: dict[str, bytes] = {}
-    monkeypatch.setattr(answers_module, "save_encrypted", lambda path, payload: saved.__setitem__("payload", payload))
-    monkeypatch.setattr(answers_module, "load_encrypted", lambda path: saved.get("payload", b"{}"))
+    import job_scout.application.security as security
+
+    cipher = Fernet(Fernet.generate_key())
+    monkeypatch.setattr(security, "_fernet", lambda: cipher)
     memory = AnswerMemory(tmp_path / "answers.enc")
     memory.remember("email", "person@example.com", sensitive=False)
     assert memory.reusable("email", sensitive=False).answer == "person@example.com"

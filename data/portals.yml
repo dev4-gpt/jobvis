@@ -78,7 +78,6 @@ title_filter:
     - "Transformation"
   negative:
     # [CUSTOMIZE] Add keywords for roles you want to exclude
-    - "Junior"
     - ".NET"
     - "Java "
     - "iOS"
@@ -100,7 +99,6 @@ title_filter:
     - "QA"
     - "Quality Assurance"
     - "Manual QA"
-    - "Software Engineer"  # Only want ML/DS roles, not general SWE
   seniority_boost:
     # These prefixes add relevance but are not required
     - "Senior"

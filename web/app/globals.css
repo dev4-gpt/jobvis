@@ -34,6 +34,19 @@
   box-sizing: border-box;
 }
 
+.integrations-panel { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.integrations-panel h2 { font-size: 15px; font-weight: 500; }
+.integrations-panel details { border-top: 1px solid var(--glass-edge); margin-top: 16px; padding-top: 14px; }
+.integrations-panel summary { cursor: pointer; color: var(--core); padding: 8px 0; }
+.integrations-panel label { display: block; margin: 10px 0; }
+.integrations-panel button { color: var(--core); background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 8px; padding: 9px 12px; margin: 4px 6px 4px 0; cursor: pointer; font: inherit; }
+.integrations-panel button:disabled { opacity: .45; cursor: default; }
+.integrations-panel input:not([type="checkbox"]), .integrations-panel textarea { width: 100%; display: block; color: var(--ink); background: rgba(0,0,0,.25); border: 1px solid var(--glass-edge); border-radius: 6px; padding: 9px; margin-top: 6px; font: inherit; }
+.integrations-panel textarea { min-height: 85px; resize: vertical; }
+.integrations-panel article { padding: 10px 0; border-bottom: 1px solid var(--glass-edge); }
+.integrations-panel a { color: var(--cyan); }
+.integrations-panel :focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
 html,
 body {
   margin: 0;

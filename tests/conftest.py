@@ -12,6 +12,10 @@ import pytest
 # Force every network-backed source off so tests never hit an API or spend
 # credits. Empty env vars override any values in a developer's local .env.
 os.environ["OPIK_ENABLED"] = "false"
+os.environ["JOBVIS_LIVENESS_ENABLED"] = "false"
+os.environ["JOBVIS_DIRECT_SOURCES_ENABLED"] = "false"
+os.environ["APIFY_API_TOKEN"] = ""
+os.environ["JOBVIS_DATA_DIR"] = ""
 os.environ["OPIK_API_KEY"] = ""
 os.environ["ADZUNA_APP_ID"] = ""
 os.environ["ADZUNA_APP_KEY"] = ""
@@ -60,6 +64,13 @@ def _isolated_candidate_store(tmp_path, monkeypatch):
 
     monkeypatch.setattr(candidate_store, "_STORE_DIR", tmp_path / "candidate")
     monkeypatch.setattr(candidate_store, "_STORE_PATH", tmp_path / "candidate" / "profile.json")
+    monkeypatch.setenv("JOBVIS_DATA_DIR", str(tmp_path / "application-data"))
+    get_settings.cache_clear()
+    from job_scout.tools.direct_sources import _BOARD_CACHE
+    from job_scout.tools.liveness import _CACHE
+
+    _BOARD_CACHE.clear()
+    _CACHE.clear()
 
 
 @pytest.fixture

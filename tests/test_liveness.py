@@ -53,10 +53,10 @@ class TestLivenessClassifier(unittest.TestCase):
         res = classify_liveness(status_code=200, body_text=body)
         self.assertEqual(res["status"], "active")
 
-    def test_short_content_is_expired(self):
+    def test_short_content_is_uncertain(self):
         # Page with only navigation footer (< 300 chars)
         res = classify_liveness(status_code=200, body_text="Home | About Us | Contact")
-        self.assertEqual(res["status"], "expired")
+        self.assertEqual(res["status"], "uncertain")
         self.assertIn("insufficient content", res["reason"])
 
     def test_uncertain_when_content_present_without_apply(self):

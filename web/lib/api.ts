@@ -35,6 +35,7 @@ export type Job = {
   salary_text?: string;
   source_url?: string;
   source?: string;
+  liveness?: { liveness: "active" | "expired" | "uncertain"; reason: string; checked_at?: number };
 };
 
 export type Pack = {
@@ -113,6 +114,8 @@ export type State = {
       returned: number;
       contributed: boolean;
       error?: string | null;
+      expired?: number;
+      incomplete_checks?: number;
     }[];
   };
   pack: Pack | null;
@@ -173,6 +176,35 @@ async function getJson<T>(path: string): Promise<T> {
   if (!response.ok) throw new Error(`${path} failed: ${response.status}`);
   return (await response.json()) as T;
 }
+
+export async function integrationRequest<T>(path: string, method = "GET", data?: unknown): Promise<T> {
+  const response = await fetch(`${BASE}/api${path}`, {
+    method, headers: { "content-type": "application/json" },
+    ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail));
+  return body as T;
+}
+
+export const exportQueueUrl = (exportId: string) => `${BASE}/api/packs/exports/${encodeURIComponent(exportId)}/queue`;
+
+export type Integrations = {
+  direct_sources_enabled: boolean; boards: Record<string, string[]>; liveness_enabled: boolean;
+  apify_ready: boolean; apify_hint: string;
+};
+export type Expansion = { status: string; run_id: string | null; returned?: number; error?: string };
+export type MemoryEntry = {
+  id: string; content: string; category: string; question_key: string; confirmed: boolean;
+  sensitive: boolean; provenance: string; confirmed_at?: string | null;
+};
+export type ReviewedSnapshot = {
+  id: string; job_id: string; company: string; role: string; score: number; approved_at: string | null;
+};
+export type TrackedApplication = {
+  application_id: string; title: string; company: string; status: string;
+  followup_due: string[]; thank_you_due?: string | null;
+};
 
 export const getConfig = () => getJson<Config>("/api/config");
 export const getState = () => getJson<State>("/api/state");

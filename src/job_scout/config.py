@@ -57,6 +57,10 @@ class Settings(BaseSettings):
 
     jsearch_api_key: SecretStr = Field(default=SecretStr(""), alias="JSEARCH_API_KEY")
     apify_api_token: SecretStr = Field(default=SecretStr(""), alias="APIFY_API_TOKEN")
+    apify_task_id: str = Field(default="", alias="APIFY_TASK_ID")
+    apify_input_template: str = Field(default="", alias="APIFY_INPUT_TEMPLATE")
+    apify_output_mapping: str = Field(default="", alias="APIFY_OUTPUT_MAPPING")
+    liveness_enabled: bool = Field(default=True, alias="JOBVIS_LIVENESS_ENABLED")
     adzuna_app_id: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_ID")
     adzuna_app_key: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_KEY")
     greenhouse_board_tokens: str = Field(default="", alias="GREENHOUSE_BOARD_TOKENS")
@@ -198,15 +202,22 @@ class Settings(BaseSettings):
 
     @property
     def greenhouse_boards(self) -> list[str]:
-        return self._configured_list(self.greenhouse_board_tokens)
+        return self._boards("greenhouse", self.greenhouse_board_tokens)
 
     @property
     def lever_accounts(self) -> list[str]:
-        return self._configured_list(self.lever_companies)
+        return self._boards("lever", self.lever_companies)
 
     @property
     def ashby_boards(self) -> list[str]:
-        return self._configured_list(self.ashby_job_boards)
+        return self._boards("ashby", self.ashby_job_boards)
+
+    def _boards(self, source: str, configured: str) -> list[str]:
+        if configured.strip() or not self.direct_sources_enabled:
+            return list(dict.fromkeys(self._configured_list(configured)))
+        from job_scout.tools.portals_registry import PortalsRegistry
+
+        return PortalsRegistry().board_tokens(source)
 
     @property
     def has_usajobs(self) -> bool:

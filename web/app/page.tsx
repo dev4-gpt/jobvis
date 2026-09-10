@@ -21,6 +21,7 @@ import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import JobvisOrb from "@/components/JobvisOrb";
+import IntegrationsPanel from "@/components/IntegrationsPanel";
 import { ActivityPanel, ApplicationPanel, JobsPanel, NextPanel, PackPanel, nextStep } from "@/components/Panels";
 import {
   eventsUrl,
@@ -266,6 +267,7 @@ function Console() {
         <JobsPanel state={state} onOpenApplication={openJobApplication} />
         <PackPanel state={state} />
         <ApplicationPanel state={state} onFillSafe={approveSafeFields} />
+        <IntegrationsPanel key={`${state.thread_id}:${state.candidate?.name ?? ""}`} state={state} />
         <ActivityPanel lines={lines} />
       </main>
 

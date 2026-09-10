@@ -1,14 +1,12 @@
-"""Apify scraping fleet client and JobSource adapter.
-
-Provides a production-grade interface to Apify cloud actors (ATS scraper,
-LinkedIn scraper, Indeed scraper) with residential proxy rotation, asynchronous
-run monitoring, dataset retrieval, and normalization into JobPosting schemas.
-"""
+"""Apify normalization helpers and explicit configured-task execution."""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import re
+import time
 from typing import Any
 
 import httpx
@@ -20,6 +18,124 @@ logger = logging.getLogger(__name__)
 
 DESCRIPTION_LIMIT = 4000
 APIFY_API_BASE = "https://api.apify.com/v2"
+
+
+class ApifyTaskError(ValueError):
+    pass
+
+
+class ConfiguredApifyTask:
+    """One explicitly requested saved task; never part of ordinary source fan-out."""
+
+    def __init__(self, settings=None):
+        self.settings = settings or get_settings()
+        self.state: dict[str, Any] = {"status": "idle", "run_id": None}
+
+    def configuration(self) -> tuple[dict, dict]:
+        settings = self.settings
+        if not settings.apify_api_token.get_secret_value() or not re.fullmatch(r"[\w~-]+", settings.apify_task_id):
+            raise ApifyTaskError("Configure APIFY_API_TOKEN and APIFY_TASK_ID")
+        try:
+            template = json.loads(settings.apify_input_template)
+            mapping = json.loads(settings.apify_output_mapping)
+            if not isinstance(template, dict) or not isinstance(mapping, dict):
+                raise ValueError
+            if not all(isinstance(mapping.get(key), str) and mapping[key] for key in ("title", "company", "url")):
+                raise ValueError
+            if not all(isinstance(path, str) and path for path in mapping.values()):
+                raise ValueError
+            self._input(template, {"query": "test", "location": "", "country": "us", "remote": False, "limit": 25})
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ApifyTaskError("Configure a JSON input template and title/company/url output field mapping") from exc
+        return template, mapping
+
+    def _input(self, value, criteria):
+        if isinstance(value, dict):
+            return {key: self._input(item, criteria) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._input(item, criteria) for item in value]
+        if isinstance(value, str) and value.startswith("$"):
+            return criteria[value[1:]]
+        return value
+
+    def run(self, criteria: dict, *, client=None, deadline: float = 120, cancelled=lambda: False) -> list[JobPosting]:
+        template, mapping = self.configuration()
+        criteria = {key: criteria[key] for key in ("query", "location", "country", "remote", "limit")}
+        criteria["limit"] = min(25, int(criteria["limit"]))
+        own = client is None
+        client = client or httpx.Client(headers={"Authorization": f"Bearer {self.settings.apify_api_token.get_secret_value()}"})
+        end = time.monotonic() + deadline
+        run_id = None
+        self.state = {"status": "starting", "run_id": None}
+
+        def request(method, path, **kwargs):
+            remaining = end - time.monotonic()
+            if remaining <= 0 or cancelled():
+                raise TimeoutError
+            response = client.request(method, APIFY_API_BASE + path, timeout=min(10, remaining), **kwargs)
+            response.raise_for_status()
+            return response.json()
+
+        try:
+            run = request(
+                "POST",
+                f"/actor-tasks/{self.settings.apify_task_id}/runs",
+                params={"timeout": 120, "maxItems": 25},
+                json=self._input(template, criteria),
+            )["data"]
+            run_id = run["id"]
+            self.state = {"status": "running", "run_id": run_id}
+            while run.get("status") not in {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}:
+                if cancelled() or time.monotonic() >= end:
+                    raise TimeoutError
+                time.sleep(min(1, max(0, end - time.monotonic())))
+                run = request("GET", f"/actor-runs/{run_id}")["data"]
+            if run["status"] != "SUCCEEDED":
+                raise ApifyTaskError(f"Apify run ended with {run['status']}")
+            items = request("GET", f"/datasets/{run['defaultDatasetId']}/items", params={"limit": 25, "clean": "true"})
+            if not isinstance(items, list):
+                raise ApifyTaskError("Apify dataset response is not a list")
+            fleet = ApifyJobFleet(api_token="")
+            jobs = []
+            for raw in items[:25]:
+                if not isinstance(raw, dict):
+                    continue
+                mapped = {}
+                for key, source in mapping.items():
+                    value = raw
+                    for part in source.split("."):
+                        value = value.get(part) if isinstance(value, dict) else None
+                    mapped[key] = value
+                job = fleet.normalize_apify_item(mapped)
+                from job_scout.tools.liveness import valid_job_url
+
+                if job and valid_job_url(job.application_url or job.url):
+                    jobs.append(job)
+            if items and not jobs:
+                raise ApifyTaskError("Dataset returned records but none matched the configured output mapping")
+            self.state.update(status="complete", returned=len(jobs))
+            return jobs
+        except (TimeoutError, httpx.TimeoutException) as exc:
+            aborted = False
+            if run_id:
+                try:
+                    response = client.request("POST", f"{APIFY_API_BASE}/actor-runs/{run_id}/abort", timeout=5)
+                    aborted = response.is_success
+                except httpx.HTTPError:
+                    pass
+            self.state.update(
+                status="timed_out",
+                cancellation_requested=aborted,
+                error="Run stopped waiting; cancellation was attempted. Provider charges may still apply.",
+            )
+            raise ApifyTaskError(self.state["error"]) from exc
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            message = str(exc) if isinstance(exc, ApifyTaskError) else f"Apify request or response failed ({type(exc).__name__})"
+            self.state.update(status="failed", error=message)
+            raise ApifyTaskError(message) from exc
+        finally:
+            if own:
+                client.close()
 
 
 class ApifyJobFleet:
@@ -49,21 +165,20 @@ class ApifyJobFleet:
 
         clean_actor_id = actor_id.replace("/", "~")
         url = f"{APIFY_API_BASE}/acts/{clean_actor_id}/run-sync-get-dataset-items"
-        params = {"token": self.api_token}
 
         try:
             with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(url, params=params, json=run_input)
+                resp = client.post(url, headers={"Authorization": f"Bearer {self.api_token}"}, json=run_input)
                 resp.raise_for_status()
                 data = resp.json()
                 if isinstance(data, list):
                     return data
                 return []
         except httpx.HTTPStatusError as exc:
-            logger.warning("Apify actor %s returned HTTP %s: %s", actor_id, exc.response.status_code, exc)
+            logger.warning("Apify actor returned HTTP %s", exc.response.status_code)
             return []
         except Exception as exc:
-            logger.warning("Apify actor %s run failed: %s", actor_id, exc)
+            logger.warning("Apify actor run failed: %s", type(exc).__name__)
             return []
 
     def scrape_ats_jobs(
@@ -86,15 +201,8 @@ class ApifyJobFleet:
         if remote:
             run_input["includeRemoteOnly"] = True
 
-        raw_items = self.run_actor_sync("apify/ats-jobs-scraper", run_input)
-        postings: list[JobPosting] = []
-
-        for item in raw_items:
-            posting = self.normalize_apify_item(item)
-            if posting:
-                postings.append(posting)
-
-        return postings[:limit]
+        task = ConfiguredApifyTask()
+        return task.run({"query": query, "location": location or "", "country": "", "remote": remote, "limit": min(limit, 25)})
 
     def normalize_apify_item(self, item: dict[str, Any]) -> JobPosting | None:
         """Normalize an Apify dataset item into a validated JobPosting."""
@@ -104,15 +212,16 @@ class ApifyJobFleet:
             if not title or not company:
                 return None
 
-            location = item.get("location") or item.get("city") or "Remote"
+            location = item.get("location") or item.get("city") or "Unspecified"
             url = item.get("url") or item.get("jobUrl") or item.get("applyUrl") or ""
             description = item.get("description") or item.get("text") or ""
             if len(description) > DESCRIPTION_LIMIT:
                 description = description[:DESCRIPTION_LIMIT]
 
-            remote = bool(item.get("isRemote") or item.get("remote") or "remote" in location.lower() or "remote" in title.lower())
+            flag = item.get("isRemote", item.get("remote", False))
+            remote = flag is True or str(flag).lower() == "true" or "remote" in location.lower()
 
-            raw_id = str(item.get("id") or item.get("jobId") or f"{company}-{title}")
+            raw_id = str(item.get("id") or item.get("jobId") or hashlib.sha256(url.encode()).hexdigest()[:20])
             content_sig = f"{company}::{title}::{location}".lower()
             content_hash = hashlib.sha256(content_sig.encode("utf-8")).hexdigest()
 
@@ -137,7 +246,7 @@ class ApifyJobFleet:
                 salary_text=str(item.get("salary") or item.get("compensation") or ""),
             )
         except Exception as exc:
-            logger.debug("Failed to normalize Apify item %s: %s", item, exc)
+            logger.debug("Failed to normalize Apify item: %s", type(exc).__name__)
             return None
 
 

@@ -128,15 +128,24 @@ def rank_jobs(state: AgentState) -> dict:
     settings = get_settings()
     profile = state["profile"]
     jobs = state.get("jobs", [])
+    diagnostics_sources = [d.model_copy(deep=True) for d in state.get("source_diagnostics", [])]
+    if getattr(settings, "liveness_enabled", False):
+        from job_scout.tools.liveness import filter_live_jobs
+
+        jobs = filter_live_jobs(jobs, diagnostics_sources)
+        for diagnostic in diagnostics_sources:
+            diagnostic.contributed = any(job.source == diagnostic.source for job in jobs)
     if not jobs:
-        return {"ranked_jobs": []}
+        return {"jobs": [], "ranked_jobs": [], "source_diagnostics": diagnostics_sources}
 
     ranked: list[RankedJob] = list(state.get("ranked_jobs") or [])
+    live_by_id = {job.job_id: job for job in jobs}
+    ranked = [r.model_copy(update={"job": live_by_id[r.job.job_id]}) for r in ranked if r.job.job_id in live_by_id]
     already_scored = {r.job.job_id for r in ranked}
     to_score = [job for job in jobs if job.job_id not in already_scored]
     if not to_score:
         ranked.sort(key=lambda r: r.fit_score, reverse=True)
-        return {"ranked_jobs": ranked}
+        return {"jobs": jobs, "ranked_jobs": ranked, "source_diagnostics": diagnostics_sources}
 
     by_id = {job.job_id: job for job in to_score}
     calls = state.get("llm_calls", 0)
@@ -249,7 +258,7 @@ def rank_jobs(state: AgentState) -> dict:
     ranked.sort(key=lambda r: (r.eligibility_status == "blocked", r.primary_or_adjacent != "primary", -r.fit_score))
     errors = list(state.get("errors") or [])
     errors.extend(f"rank_jobs: {diagnostic}" for diagnostic in diagnostics)
-    return {"ranked_jobs": ranked, "llm_calls": calls, "errors": errors}
+    return {"jobs": jobs, "ranked_jobs": ranked, "llm_calls": calls, "errors": errors, "source_diagnostics": diagnostics_sources}
 
 
 def _evidence_score(score) -> int:

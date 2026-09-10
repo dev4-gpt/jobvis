@@ -99,6 +99,8 @@ class VoiceBridge:
     def register_thread(self, thread_id: str) -> None:
         """A fresh wizard session: forget everything from the previous one."""
         with self._lock:
+            if self._run is not None and not self._run.done:
+                self._run.cancel_event.set()
             self._snapshot = WizardSnapshot(thread_id=thread_id)
             self._run = None
 
@@ -171,6 +173,19 @@ class VoiceBridge:
         if not snap.thread_id:
             return "No session yet — the user needs to open the app first."
         return self._launch("tailor", lambda run: self._drive_tailor(snap, run, selected_job_id))
+
+    def start_expansion(self, work) -> str | None:
+        """Serialize manual expansion with the existing search/tailor lifecycle."""
+        def drive(run):
+            self._set_status(run, "expanding search with Apify…")
+            try:
+                work(run.cancel_event.is_set)
+            except Exception as exc:
+                self._finish(run, failed=True, error=str(exc), step="results")
+            else:
+                self._finish(run, failed=False, error="", step="results")
+
+        return self._launch("expansion", drive)
 
     def run_status(self, *, include_lifecycle: bool = False) -> dict:
         with self._lock:

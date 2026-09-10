@@ -7,6 +7,9 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from cryptography.fernet import Fernet
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -74,9 +77,12 @@ class TestSynapticMemoryVault(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.storage_path = Path(self.tmp_dir.name)
-        self.vault = SynapticMemoryVault(storage_dir=self.storage_path)
+        self.encryption = patch("job_scout.application.security._fernet", return_value=Fernet(Fernet.generate_key()))
+        self.encryption.start()
+        self.vault = SynapticMemoryVault(storage_dir=self.storage_path, candidate_id="test")
 
     def tearDown(self) -> None:
+        self.encryption.stop()
         self.tmp_dir.cleanup()
 
     def test_create_and_reload_memory(self) -> None:
@@ -87,10 +93,11 @@ class TestSynapticMemoryVault(unittest.TestCase):
         )
         self.assertIsNotNone(mem.id)
         self.assertEqual(mem.category, "experience")
-        self.assertTrue(mem.verified)
+        self.assertFalse(mem.confirmed)
+        self.vault.service.save(mem, confirm=True)
 
         # Reload vault from disk in new instance
-        reloaded_vault = SynapticMemoryVault(storage_dir=self.storage_path)
+        reloaded_vault = SynapticMemoryVault(storage_dir=self.storage_path, candidate_id="test")
         searched = reloaded_vault.search_memories("LangGraph", category="experience")
         self.assertEqual(len(searched), 1)
         self.assertEqual(searched[0].id, mem.id)
@@ -103,13 +110,15 @@ class TestSynapticMemoryVault(unittest.TestCase):
             tags=["references"],
             redact_pii=True,
         )
-        self.assertTrue(mem.pii_redacted)
+        self.assertFalse(mem.confirmed)
         self.assertNotIn("aryaman@example.com", mem.content)
         self.assertIn("[EMAIL_REDACTED]", mem.content)
 
     def test_search_memories_filtering(self) -> None:
         self.vault.create_memory("Expert in Python, TypeScript, and Rust.", "skill", tags=["languages"])
         self.vault.create_memory("Completed MS in Computer Science at Columbia.", "education", tags=["degree"])
+        for entry in self.vault.service.list():
+            self.vault.service.save(entry, confirm=True)
 
         skill_hits = self.vault.search_memories("Python", category="skill")
         self.assertEqual(len(skill_hits), 1)
@@ -122,9 +131,7 @@ class TestSynapticMemoryVault(unittest.TestCase):
     def test_inject_context_formatting(self) -> None:
         self.vault.create_memory("Deployed high-throughput PyTorch recommendation service.", "experience", tags=["PyTorch"])
         context = self.vault.inject_context("PyTorch Engineer", "Meta")
-        self.assertIn("Relevant Candidate Memory Context:", context)
-        self.assertIn("[EXPERIENCE]", context)
-        self.assertIn("PyTorch", context)
+        self.assertEqual(context, "")
 
 
 if __name__ == "__main__":

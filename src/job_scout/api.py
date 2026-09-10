@@ -96,6 +96,8 @@ def _job_row(ranked: RankedJob, rank: int) -> dict:
         "fit_score": ranked.fit_score,
         "why": ranked.fit_explanation,
     }
+    if ranked.job.liveness is not None:
+        row["liveness"] = ranked.job.liveness
     has_policy = (
         ranked.final_priority_score
         or ranked.role_fit_score
@@ -428,6 +430,9 @@ async def event_stream(disconnected: Callable[[], Awaitable[bool]], poll: float 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Jobvis", docs_url=None, redoc_url=None)
+    from job_scout.integrations_api import router
+
+    app.include_router(router)
 
     # `npm run dev` serves the console from :3000 against this API. The built
     # console is same-origin, so this only ever matters in development.

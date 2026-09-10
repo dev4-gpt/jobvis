@@ -86,6 +86,7 @@ export function JobsPanel({ state, onOpenApplication }: { state: State; onOpenAp
       <span className="rank">{String(job.rank).padStart(2, "0")}</span>
       <span className="job">
         <b>{job.title}</b>
+        {job.liveness && <small>Listing {job.liveness.liveness}: {job.liveness.reason}</small>}
         <span className="meta">
           {job.company} · {job.location}
         </span>
@@ -102,8 +103,7 @@ export function JobsPanel({ state, onOpenApplication }: { state: State; onOpenAp
       {allowOpen && job.url && (
         <span className="job-actions no-drag">
           <a className="mini-action" href={job.listing_url || job.url} target="_blank" rel="noreferrer">Listing</a>
-          <a className="mini-action" href={job.application_url || job.url} target="_blank" rel="noreferrer">Apply</a>
-          <button type="button" className="mini-action" onClick={() => onOpenApplication(job.job_id)}>Inspect</button>
+          <button type="button" className="mini-action" onClick={() => onOpenApplication(job.job_id)}>Check and open application</button>
         </span>
       )}
     </div>
@@ -124,7 +124,7 @@ export function JobsPanel({ state, onOpenApplication }: { state: State; onOpenAp
       {lane("Blocked or review-required", blocked, false)}
       {state.source_coverage?.diagnostics && state.source_coverage.diagnostics.length > 0 && (
         <div className="meta source-diagnostics">
-          Sources: {state.source_coverage.diagnostics.map((item) => `${item.source} ${item.returned}${item.error ? " (error)" : ""}`).join(" · ")}
+          Sources: {state.source_coverage.diagnostics.map((item) => `${item.source} ${item.returned}${item.error ? " (error)" : ""}; ${item.expired || 0} expired, ${item.incomplete_checks || 0} uncertain`).join(" · ")}
         </div>
       )}
     </section>

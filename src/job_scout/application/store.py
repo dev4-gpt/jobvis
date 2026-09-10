@@ -96,6 +96,7 @@ class ApplicationStore:
             "safe_fields_filled",
             "final_review",
             "submitted_by_user",
+            "interview",
         }
         if status not in allowed:
             raise ValueError("invalid application status")
