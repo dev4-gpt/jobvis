@@ -1,3 +1,14 @@
+---
+title: Jobvis
+emoji: 💼
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+app_file: app.py
+pinned: false
+license: mit
+---
+
 # The Observable Job Agent
 
 <div align="center">
