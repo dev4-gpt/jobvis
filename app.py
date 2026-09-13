@@ -28,4 +28,7 @@ demo = build_app()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port, theme=THEME, css=CSS)  # noqa: S104
+    is_render = os.environ.get("RENDER", "false").lower() == "true"
+    default_share = "false" if is_render else "true"
+    share = os.environ.get("GRADIO_SHARE", default_share).lower() in ("true", "1", "yes")
+    demo.launch(server_name="0.0.0.0", server_port=port, share=share, theme=THEME, css=CSS)  # noqa: S104
