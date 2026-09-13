@@ -19,6 +19,7 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .ipynb_checkpoints/
+.gradio/
 
 # The locally persisted candidate (CV text + profile) — personal data, never committed
 data/candidate/
