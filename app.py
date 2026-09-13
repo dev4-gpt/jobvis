@@ -6,6 +6,16 @@ import os
 import sys
 from pathlib import Path
 
+# If running on Hugging Face ZeroGPU, declare a decorated function to satisfy the startup check
+try:
+    import spaces  # type: ignore
+
+    @spaces.GPU
+    def _hf_zerogpu_init() -> None:
+        pass
+except (ImportError, AttributeError):
+    pass
+
 # Add src/ to python path so job_scout package is discoverable
 ROOT = Path(__file__).resolve().parent
 if str(ROOT / "src") not in sys.path:
