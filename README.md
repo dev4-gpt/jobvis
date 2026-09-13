@@ -29,6 +29,16 @@ python_version: "3.12"
 </p>
 
 <p align="center">
+  <a href="https://3978ab9e0999720dcb.gradio.live" target="_blank">
+    <img src="https://img.shields.io/badge/Live%20Demo-Gradio%20Live-orange?style=for-the-badge&logo=gradio" alt="Live Demo">
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://render.com/deploy?repo=https://github.com/dev4-gpt/jobvis" target="_blank">
+    <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render">
+  </a>
+</p>
+
+<p align="center">
   <img src="docs/images/architecture_part2.png" alt="Job Scout Phase 2 architecture" width="820">
 </p>
 
