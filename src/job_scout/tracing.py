@@ -15,7 +15,9 @@ import subprocess
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
+
+T = TypeVar("T")
 
 from job_scout.config import get_settings
 from job_scout.graph.prompts.rank_jobs import RANK_JOBS_PROMPT, RANK_JOBS_PROMPT_NAME
@@ -79,7 +81,7 @@ def get_tracer(thread_id: str, tags: list[str], metadata: dict[str, Any] | None 
     )
 
 
-def traced_call[T](name: str, fn: Callable[[], T], metadata: dict[str, Any] | None = None) -> Callable[[], T]:
+def traced_call(name: str, fn: Callable[[], T], metadata: dict[str, Any] | None = None) -> Callable[[], T]:
     """Give ``fn`` its own span, named, or hand it back untouched.
 
     A trace that shows only the total search time cannot answer "which source
