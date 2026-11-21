@@ -7,8 +7,9 @@ import os
 import tempfile
 from contextlib import suppress
 from pathlib import Path
+from typing import get_args
 
-from job_scout.application.models import ApplicationRecord
+from job_scout.application.models import ApplicationRecord, ApplicationStatus
 from job_scout.config import get_settings
 
 
@@ -87,18 +88,7 @@ class ApplicationStore:
         record = self.get(application_id)
         if record is None:
             return None
-        allowed = {
-            "discovered",
-            "saved",
-            "tailored",
-            "reviewed",
-            "opened",
-            "safe_fields_filled",
-            "final_review",
-            "submitted_by_user",
-            "interview",
-        }
-        if status not in allowed:
+        if status not in get_args(ApplicationStatus):
             raise ValueError("invalid application status")
         record.transition(status, detail)  # type: ignore[arg-type]
         return self.upsert(record)

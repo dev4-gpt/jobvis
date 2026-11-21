@@ -15,7 +15,7 @@ python_version: "3.12"
 <div align="center">
   <h3>Job Scout: a real AI job-matching agent you can see inside</h3>
   <p>Upload your CV (PDF). Get real openings ranked 0 to 100 for fit, honest gap explanations, and a tailored application pack. Then ask for all of it out loud. Every LLM and tool call traced in <a href="https://www.comet.com/docs/opik/">Opik</a> from run one.</p>
-  <p><strong>The human applies. The agent never submits.</strong></p>
+  <p><strong>You review and authorize each application.</strong></p>
 </div>
 
 <p align="center">
@@ -106,8 +106,9 @@ repair attempt and remains visibly marked for review.
 The optional review-gated browser workflow is documented in
 [`docs/application_autofill.md`](docs/application_autofill.md). It can inspect
 Greenhouse, Lever, and Ashby forms and fill only approved safe fields in a
-visible local browser. It never stores passwords and never submits an
-application.
+visible local browser. Submission is manual by default. An optional setting
+allows a single click on a supported employer form after you explicitly confirm
+that application in the console.
 
 ## 🎙️ Jobvis, the voice console (optional, Part 4)
 

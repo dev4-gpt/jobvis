@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
+from uuid import uuid4
 
 from job_scout.application.ats import ApplicantFacts, FormInspection, discover_fields
 from job_scout.application.browser import BrowserUnavailable, VisibleApplicationBrowser
 from job_scout.application.store import ApplicationStore
 from job_scout.graph.schemas import CVLink, Profile, RankedJob
+
+
+def _browser_thread(method):
+    @wraps(method)
+    def run(self, *args, **kwargs):
+        # Playwright's synchronous objects must stay on their creating thread.
+        return self._executor.submit(method, self, *args, **kwargs).result()
+
+    return run
 
 
 @dataclass
@@ -21,6 +33,7 @@ class ApplicationState:
     status: str = "idle"
     message: str = ""
     inspection: FormInspection | None = None
+    review_id: str = ""
 
     def public(self) -> dict:
         inspection = self.inspection
@@ -32,6 +45,7 @@ class ApplicationState:
             "application_url": self.application_url,
             "status": self.status,
             "message": self.message,
+            "review_id": self.review_id,
             "ats": inspection.ats.value if inspection else None,
             "fields": [
                 {
@@ -48,13 +62,15 @@ class ApplicationState:
 
 
 class ApplicationController:
-    """Review-gated controller. There is intentionally no submit operation."""
+    """Review-gated controller with an explicit, opt-in submit operation."""
 
     def __init__(self) -> None:
         self.browser = VisibleApplicationBrowser()
         self.store = ApplicationStore()
         self.state = ApplicationState()
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="jobvis-application")
 
+    @_browser_thread
     def open(self, ranked: RankedJob, profile: Profile, links: list[CVLink]) -> dict:
         listing_url = ranked.job.listing_url or ranked.job.source_url or ranked.job.url
         application_url = ranked.job.application_url or ranked.job.url or listing_url
@@ -109,44 +125,87 @@ class ApplicationController:
         self.state = ApplicationState(
             application_id=record.application_id,
             job_id=ranked.job.job_id,
-            url=application_url,
+            url=page.url,
             listing_url=listing_url,
             application_url=application_url,
             status="review_mapping",
             message="Review the proposed mappings. Login, MFA, and CAPTCHA remain manual.",
             inspection=inspection,
         )
-        self.store.mark(record.application_id, "opened", "Application inspected; final submission remains manual.")
+        self.store.mark(record.application_id, "opened", "Application inspected for review.")
         return self.state.public()
 
+    @_browser_thread
     def inspect_html(self, url: str, html: str) -> dict:
         inspection = discover_fields(url, html)
         self.state = ApplicationState(
-            application_id=self.state.application_id,
-            job_id=self.state.job_id,
             url=url,
-            listing_url=self.state.listing_url,
             application_url=url,
             status="review_mapping",
             inspection=inspection,
         )
         return self.state.public()
 
-    def fill_safe(self, approved_ids: set[str], artifacts: dict[str, Path] | None = None) -> dict:
-        if self.state.inspection is None:
-            self.state.status = "blocked"
-            self.state.message = "Open and inspect an application before filling fields."
-            return self.state.public()
+    @_browser_thread
+    def fill_safe(
+        self,
+        approved_ids: set[str],
+        artifacts: dict[str, Path] | None = None,
+        *,
+        application_id: str | None = None,
+        pack_job_id: str = "",
+    ) -> dict:
+        if application_id is not None and application_id != self.state.application_id:
+            return {**self.state.public(), "message": "The application changed. Review its fields again."}
+        if self.state.status != "review_mapping" or self.state.inspection is None or not self.state.application_id:
+            return {**self.state.public(), "message": "Open and inspect an application before filling fields."}
+        if pack_job_id != self.state.job_id:
+            artifacts = None
         try:
             filled = self.browser.fill_safe_fields(self.state.inspection, approved_ids, artifacts)
+        except Exception as exc:  # noqa: BLE001 - browser errors pause the workflow
+            self.state.status = "blocked"
+            self.state.message = str(exc)
+            return self.state.public()
+        from job_scout.config import get_settings
+
+        self.state.status = "final_review"
+        if get_settings().auto_submit_enabled:
+            self.state.review_id = uuid4().hex
+        self.state.message = f"Filled {len(filled)} approved safe fields. Review everything before submitting."
+        if self.state.application_id:
+            self.store.mark(self.state.application_id, "final_review", self.state.message)
+        return self.state.public()
+
+    @_browser_thread
+    def submit(self, confirmation: str, review_id: str) -> dict:
+        """Submit the one visible, reviewed application after exact confirmation."""
+        from job_scout.config import get_settings
+
+        if not get_settings().auto_submit_enabled:
+            return {**self.state.public(), "message": "Jobvis submission is disabled. Submit manually in the browser."}
+        if self.state.status != "final_review" or not review_id or review_id != self.state.review_id:
+            return {**self.state.public(), "message": "This review is no longer active. Check the current application."}
+        if confirmation.strip() != "SUBMIT APPLICATION":
+            self.state.message = "Type SUBMIT APPLICATION to confirm this single submission."
+            return self.state.public()
+        self.state.review_id = ""
+        try:
+            self.browser.submit(self.state.url)
         except BrowserUnavailable as exc:
             self.state.status = "blocked"
             self.state.message = str(exc)
             return self.state.public()
-        self.state.status = "final_review"
-        self.state.message = f"Filled {len(filled)} approved safe fields. Review everything and click Submit yourself."
+        except Exception:  # noqa: BLE001 - an interrupted click may already have reached the employer
+            self.state.status = "submission_unconfirmed"
+            self.state.message = "Check the employer page for confirmation before attempting another submission."
+            if self.state.application_id:
+                self.store.mark(self.state.application_id, "submission_unconfirmed", self.state.message)
+            return self.state.public()
+        self.state.status = "submitted_by_jobvis"
+        self.state.message = "Submission was triggered in the visible browser. Check the employer confirmation page."
         if self.state.application_id:
-            self.store.mark(self.state.application_id, "final_review", self.state.message)
+            self.store.mark(self.state.application_id, "submitted_by_jobvis", self.state.message)
         return self.state.public()
 
 

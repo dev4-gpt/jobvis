@@ -13,6 +13,7 @@ from job_scout.application.answers import AnswerMemory
 from job_scout.application.ats import ApplicantFacts, ATSName, discover_fields, propose_mappings
 from job_scout.application.browser import VisibleApplicationBrowser
 from job_scout.application.controller import ApplicationController
+from job_scout.application.store import ApplicationStore
 from job_scout.cover_letter_quality import (
     evaluate_cover_letter,
     grounded_fallback_letter,
@@ -331,10 +332,35 @@ def test_sensitive_answers_require_consent_and_are_not_auto_reused(monkeypatch, 
     assert suggested is not None and suggested.sensitive is True
 
 
-def test_application_controller_has_no_submit_operation():
+def test_application_controller_submit_is_feature_flagged_and_requires_confirmation(monkeypatch, tmp_path):
     controller = ApplicationController()
-    assert not hasattr(controller, "submit")
-    assert not hasattr(controller.browser, "submit")
+    controller.store = ApplicationStore(tmp_path)
+    record = controller.store.create_for_job(
+        job_id="job-1", title="AI Engineer", company="Acme", listing_url="", application_url="", source="cache",
+    )
+    controller.state.status = "final_review"
+    controller.state.application_id = record.application_id
+    controller.state.url = "https://jobs.lever.co/acme/job-1"
+    controller.state.review_id = "current-review"
+    from job_scout.config import get_settings
+
+    clicked = []
+    monkeypatch.setattr(controller.browser, "submit", clicked.append)
+    try:
+        monkeypatch.setenv("JOBVIS_AUTO_SUBMIT_ENABLED", "false")
+        get_settings.cache_clear()
+        assert "disabled" in controller.submit("SUBMIT APPLICATION", "current-review")["message"]
+        monkeypatch.setenv("JOBVIS_AUTO_SUBMIT_ENABLED", "true")
+        get_settings.cache_clear()
+        assert controller.submit("SUBMIT APPLICATION", "stale-review")["status"] == "final_review"
+        assert controller.submit("nope", "current-review")["status"] == "final_review"
+        assert clicked == []
+        assert controller.submit("SUBMIT APPLICATION", "current-review")["status"] == "submitted_by_jobvis"
+        assert controller.store.get(record.application_id).status == "submitted_by_jobvis"
+        assert controller.submit("SUBMIT APPLICATION", "current-review")["status"] == "submitted_by_jobvis"
+        assert clicked == [controller.state.url]
+    finally:
+        get_settings.cache_clear()
 
 
 def test_application_controller_reports_manual_browser_fallback(monkeypatch):
@@ -372,6 +398,8 @@ def test_file_uploads_require_individual_approval(tmp_path):
             self.uploaded.append(value)
 
     class FakePage:
+        url = "https://boards.greenhouse.io/acme/jobs/1"
+
         def __init__(self):
             self.locators: dict[str, FakeLocator] = {}
 

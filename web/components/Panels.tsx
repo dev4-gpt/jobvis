@@ -246,10 +246,17 @@ export function PackPanel({ state }: { state: State }) {
   );
 }
 
-export function ApplicationPanel({ state, onFillSafe }: { state: State; onFillSafe: (ids: string[]) => void }) {
+export function ApplicationPanel({ state, onFillSafe, onSubmit }: {
+  state: State;
+  onFillSafe: (applicationId: string, ids: string[]) => void;
+  onSubmit: (reviewId: string, confirmation: string) => void;
+}) {
   const application = state.application;
   const [selected, setSelected] = useState<string[]>([]);
+  const [confirmation, setConfirmation] = useState("");
   if (!application || application.status === "idle") return null;
+  const applicationId = application.application_id;
+  const reviewId = application.review_id;
   const safeFields = application.fields.filter((field) => !field.sensitive && field.has_value);
   return (
     <section className="block no-drag">
@@ -272,12 +279,23 @@ export function ApplicationPanel({ state, onFillSafe }: { state: State; onFillSa
           </span>
         </label>
       ))}
-      {safeFields.length > 0 && (
-        <button type="button" className="pill solid" onClick={() => onFillSafe(selected)} disabled={selected.length === 0}>
+      {application.status === "review_mapping" && applicationId && safeFields.length > 0 && (
+        <button type="button" className="pill solid" onClick={() => onFillSafe(applicationId, selected)} disabled={selected.length === 0}>
           Fill approved safe fields
         </button>
       )}
-      <p className="meta">Login, MFA, CAPTCHA, unknown questions, and Submit remain manual.</p>
+      {application.status === "final_review" && reviewId && (
+        <div className="field-row">
+          <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Type SUBMIT APPLICATION" aria-label="Submission confirmation" />
+          <button type="button" className="pill solid" onClick={() => {
+            onSubmit(reviewId, confirmation);
+            setConfirmation("");
+          }} disabled={confirmation !== "SUBMIT APPLICATION"}>
+            Submit this application
+          </button>
+        </div>
+      )}
+      <p className="meta">Complete login, MFA, CAPTCHA, and unknown questions in the employer’s browser.</p>
     </section>
   );
 }

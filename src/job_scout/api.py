@@ -733,10 +733,24 @@ def create_app() -> FastAPI:
     @app.post("/api/application/fill-safe")
     def application_fill_safe(parameters: Annotated[dict | None, Body()] = None) -> dict:
         _require_pack_audit()
-        approved = {str(item) for item in (parameters or {}).get("approved_field_ids", [])}
+        body = parameters or {}
+        approved = {str(item) for item in body.get("approved_field_ids", [])}
+        bridge = voice_bridge.get_bridge()
+        values = voice_bridge.checkpoint_values(bridge.snapshot().thread_id)
         cv_pdf, _, letter_pdf, _ = _render_paths()
         artifacts = {key: path for key, path in (("resume", cv_pdf), ("cover", letter_pdf)) if path is not None}
-        return _APPLICATION.fill_safe(approved, artifacts)
+        return _APPLICATION.fill_safe(
+            approved, artifacts,
+            application_id=str(body.get("application_id") or ""),
+            pack_job_id=str(values.get("selected_job_id") or ""),
+        )
+
+    @app.post("/api/application/submit")
+    def application_submit(parameters: Annotated[dict | None, Body()] = None) -> dict:
+        """Submit one reviewed application in the visible local browser."""
+        _require_pack_audit()
+        body = parameters or {}
+        return _APPLICATION.submit(str(body.get("confirmation") or ""), str(body.get("review_id") or ""))
 
     @app.get("/api/events")
     async def events(request: Request) -> StreamingResponse:

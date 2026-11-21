@@ -31,6 +31,7 @@ import {
   getSessionStart,
   getState,
   openApplication,
+  submitApplication,
   type Config,
   type State,
 } from "@/lib/api";
@@ -172,9 +173,18 @@ function Console() {
     }
   }
 
-  async function approveSafeFields(ids: string[]) {
+  async function approveSafeFields(applicationId: string, ids: string[]) {
     try {
-      const application = await fillSafeFields(ids);
+      const application = await fillSafeFields(applicationId, ids);
+      setState((current) => ({ ...current, application }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
+  async function submitReviewedApplication(reviewId: string, confirmation: string) {
+    try {
+      const application = await submitApplication(reviewId, confirmation);
       setState((current) => ({ ...current, application }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -266,7 +276,12 @@ function Console() {
 
         <JobsPanel state={state} onOpenApplication={openJobApplication} />
         <PackPanel state={state} />
-        <ApplicationPanel state={state} onFillSafe={approveSafeFields} />
+        <ApplicationPanel
+          key={`${state.application?.application_id}:${state.application?.review_id}`}
+          state={state}
+          onFillSafe={approveSafeFields}
+          onSubmit={submitReviewedApplication}
+        />
         <IntegrationsPanel key={`${state.thread_id}:${state.candidate?.name ?? ""}`} state={state} />
         <ActivityPanel lines={lines} />
       </main>

@@ -17,6 +17,8 @@ ApplicationStatus = Literal[
     "safe_fields_filled",
     "final_review",
     "submitted_by_user",
+    "submitted_by_jobvis",
+    "submission_unconfirmed",
     "interview",
 ]
 
@@ -72,7 +74,7 @@ class ApplicationRecord(BaseModel):
         self.status = status
         self.updated_at = now_iso()
         self.events.append(ApplicationEvent(name=status, detail=detail))
-        if status == "submitted_by_user" and self.submitted_at is None:
+        if status in {"submitted_by_user", "submitted_by_jobvis"} and self.submitted_at is None:
             self.submitted_at = self.updated_at
             submitted = datetime.fromisoformat(self.submitted_at)
             self.followup_due = [(submitted + timedelta(days=days)).isoformat() for days in (7, 14)]

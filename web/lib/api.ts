@@ -52,6 +52,7 @@ export type Pack = {
 
 export type ApplicationState = {
   application_id?: string;
+  review_id?: string;
   job_id: string;
   url: string;
   listing_url?: string;
@@ -220,14 +221,23 @@ export async function openApplication(jobId: string): Promise<ApplicationState> 
   return body as ApplicationState;
 }
 
-export async function fillSafeFields(approvedFieldIds: string[]): Promise<ApplicationState> {
+export async function fillSafeFields(applicationId: string, approvedFieldIds: string[]): Promise<ApplicationState> {
   const response = await fetch(`${BASE}/api/application/fill-safe`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ approved_field_ids: approvedFieldIds }),
+    body: JSON.stringify({ application_id: applicationId, approved_field_ids: approvedFieldIds }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.detail ?? `safe fill failed: ${response.status}`);
+  return body as ApplicationState;
+}
+
+export async function submitApplication(reviewId: string, confirmation: string): Promise<ApplicationState> {
+  const response = await fetch(`${BASE}/api/application/submit`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ review_id: reviewId, confirmation }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail ?? `application submit failed: ${response.status}`);
   return body as ApplicationState;
 }
 

@@ -1,4 +1,4 @@
-"""Visible local browser control with a hard manual-submit boundary."""
+"""Visible local browser control for reviewed application submission."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from job_scout.application.ats import FormInspection, _field_key, discover_fields
 from job_scout.application.security import load_encrypted, save_encrypted
@@ -18,7 +19,7 @@ class BrowserUnavailable(RuntimeError):
 
 
 class VisibleApplicationBrowser:
-    """A visible Chromium-compatible context; no submit method by design."""
+    """A visible Chromium-compatible context; credentials always stay local."""
 
     def __init__(self, state_path: Path | None = None) -> None:
         self.state_path = state_path or Path("data/private/application/browser_state.enc")
@@ -90,6 +91,8 @@ class VisibleApplicationBrowser:
     ) -> list[str]:
         if self._page is None:
             raise BrowserUnavailable("Open the application in the visible browser first.")
+        if self._page.url != inspection.url:
+            raise BrowserUnavailable("The browser moved to a different page. Reopen the application to review its fields.")
         filled: list[str] = []
         for proposal in inspection.proposals:
             if proposal.field_id not in approved_ids or proposal.sensitive or not proposal.value:
@@ -117,6 +120,32 @@ class VisibleApplicationBrowser:
                 self._page.locator(field.selector).set_input_files(str(artifact))
                 filled.append(key)
         return filled
+
+    def submit(self, reviewed_url: str) -> None:
+        """Click one unambiguous, visible final-submit control.
+
+        The caller is responsible for the per-application confirmation and
+        feature flag. We intentionally refuse ambiguous forms rather than
+        guessing which of several buttons sends an application.
+        """
+        if self._page is None:
+            raise BrowserUnavailable("Open the application in the visible browser first.")
+        hostname = urlsplit(reviewed_url).hostname or ""
+        supported = ("greenhouse.io", "lever.co", "ashbyhq.com")
+        if self._page.url != reviewed_url or not any(hostname.endswith(f".{host}") for host in supported):
+            raise BrowserUnavailable("The reviewed form is no longer open or needs manual submission in the browser.")
+        selector = "form button:visible:enabled, form input[type='submit']:visible:enabled"
+        candidates = []
+        for index in range(self._page.locator(selector).count()):
+            candidate = self._page.locator(selector).nth(index)
+            label = (candidate.inner_text() or candidate.get_attribute("value") or "").strip().lower()
+            if " ".join(label.split()) in {"submit", "submit application", "submit my application"}:
+                candidates.append(candidate)
+        if len(candidates) != 1:
+            raise BrowserUnavailable(
+                "Could not identify one unambiguous final Submit button; submit manually in the visible browser."
+            )
+        candidates[0].click()
 
 
 def _brave_path() -> str | None:

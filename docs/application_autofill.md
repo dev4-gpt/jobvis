@@ -1,20 +1,22 @@
 # Review-gated application preparation
 
-Jobvis prepares an application; a person submits it. The local browser layer
+Jobvis prepares an application; by default, a person submits it. The local browser layer
 exists to remove repetitive typing while keeping the consequential action in
 human hands.
 
 Each selected job has separate listing and direct-application links. The local
 tracker stores the job, asset manifest, review events, and current status under
-macOS Application Support (or `JOBVIS_DATA_DIR`). It never stores passwords,
-MFA answers, or a submit endpoint.
+macOS Application Support (or `JOBVIS_DATA_DIR`). It never stores passwords
+or MFA answers.
 
 The allowed status path is:
 
 `discovered → saved → tailored → reviewed → opened → safe_fields_filled → final_review → submitted_by_user`
 
-The final transition is a manual record only. Jobvis opens the employer page,
-fills only explicitly approved safe fields, and pauses before Submit.
+Jobvis opens the employer page, fills explicitly approved safe fields, and
+pauses before Submit. The optional console action records a successful click
+as `submitted_by_jobvis` and asks you to check the employer’s confirmation page.
+If the click was interrupted, it records `submission_unconfirmed`.
 
 ## Flow
 
@@ -29,8 +31,11 @@ fills only explicitly approved safe fields, and pauses before Submit.
    letter. Approved upload fields receive the matching PDFs when available.
 6. Sensitive, ambiguous, and unknown questions pause for an answer. The
    resume is never used to guess an ambiguous response.
-7. Jobvis stops at the final review page. There is no submit method or submit
-   endpoint; click the employer's Submit button yourself.
+7. Jobvis stops at the final review page. To use the optional single-application
+   submit action, set `JOBVIS_AUTO_SUBMIT_ENABLED=true`, review every field, and
+   type `SUBMIT APPLICATION` in the final confirmation control. Jobvis only
+   clicks one unambiguous visible Submit button; login, MFA, CAPTCHA, screening
+   questions, and ambiguous forms remain manual.
 
 The parser and adapter contract is deliberately pure enough to test against
 local HTML fixtures. Page text is untrusted data: no instructions in a job

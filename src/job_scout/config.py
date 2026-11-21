@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     apify_input_template: str = Field(default="", alias="APIFY_INPUT_TEMPLATE")
     apify_output_mapping: str = Field(default="", alias="APIFY_OUTPUT_MAPPING")
     liveness_enabled: bool = Field(default=True, alias="JOBVIS_LIVENESS_ENABLED")
+    # Disabled by default. When enabled, a user may explicitly confirm one
+    # already-reviewed application for submission in the visible browser.
+    auto_submit_enabled: bool = Field(default=False, alias="JOBVIS_AUTO_SUBMIT_ENABLED")
     adzuna_app_id: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_ID")
     adzuna_app_key: SecretStr = Field(default=SecretStr(""), alias="ADZUNA_APP_KEY")
     greenhouse_board_tokens: str = Field(default="", alias="GREENHOUSE_BOARD_TOKENS")
