@@ -336,7 +336,12 @@ def test_application_controller_submit_is_feature_flagged_and_requires_confirmat
     controller = ApplicationController()
     controller.store = ApplicationStore(tmp_path)
     record = controller.store.create_for_job(
-        job_id="job-1", title="AI Engineer", company="Acme", listing_url="", application_url="", source="cache",
+        job_id="job-1",
+        title="AI Engineer",
+        company="Acme",
+        listing_url="",
+        application_url="",
+        source="cache",
     )
     controller.state.status = "final_review"
     controller.state.application_id = record.application_id

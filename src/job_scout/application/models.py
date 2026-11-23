@@ -20,6 +20,9 @@ ApplicationStatus = Literal[
     "submitted_by_jobvis",
     "submission_unconfirmed",
     "interview",
+    "offer",
+    "rejected",
+    "withdrawn",
 ]
 
 
@@ -60,6 +63,12 @@ class ApplicationRecord(BaseModel):
     listing_url: str = ""
     application_url: str = ""
     source: str = ""
+    source_ids: dict[str, list[str]] = Field(default_factory=dict)
+    posting_aliases: list[str] = Field(default_factory=list)
+    notes: str = ""
+    imported_status: str = ""
+    interview_notes: str = ""
+    interview_story_ids: list[str] = Field(default_factory=list)
     status: ApplicationStatus = "discovered"
     asset_manifest_id: str = ""
     submitted_at: str | None = None

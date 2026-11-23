@@ -431,8 +431,10 @@ async def event_stream(disconnected: Callable[[], Awaitable[bool]], poll: float 
 def create_app() -> FastAPI:
     app = FastAPI(title="Jobvis", docs_url=None, redoc_url=None)
     from job_scout.integrations_api import router
+    from job_scout.unified_api import router as unified_router
 
     app.include_router(router)
+    app.include_router(unified_router)
 
     # `npm run dev` serves the console from :3000 against this API. The built
     # console is same-origin, so this only ever matters in development.
@@ -624,11 +626,19 @@ def create_app() -> FastAPI:
         url = str(body.get("application_url") or body.get("listing_url") or body.get("url") or "").strip()
         if not url.startswith(("https://", "http://")):
             raise HTTPException(status_code=400, detail="a user-provided HTTP(S) job URL is required")
-        job_id = str(body.get("job_id") or f"manual-{uuid4()}")
-        posting = JobPosting(
-            job_id=job_id,
+        record = _APPLICATION_STORE.create_for_job(
+            job_id=str(body.get("job_id") or f"manual-{uuid4()}"),
             title=str(body.get("title") or "Imported job"),
             company=str(body.get("company") or "Unknown"),
+            listing_url=str(body.get("listing_url") or url),
+            application_url=str(body.get("application_url") or url),
+            source=str(body.get("source") or "manual"),
+        )
+        job_id = record.job_id
+        posting = JobPosting(
+            job_id=job_id,
+            title=record.title,
+            company=record.company,
             location=str(body.get("location") or "Unspecified"),
             description=str(body.get("description") or ""),
             url=url,
@@ -660,16 +670,11 @@ def create_app() -> FastAPI:
             )
             voice_bridge.get_compiled_graph().update_state(
                 {"configurable": {"thread_id": snap.thread_id}},
-                {"jobs": [*(values.get("jobs") or []), posting], "ranked_jobs": [*(values.get("ranked_jobs") or []), ranked]},
+                {
+                    "jobs": [*[job for job in values.get("jobs") or [] if job.job_id != job_id], posting],
+                    "ranked_jobs": [*[item for item in values.get("ranked_jobs") or [] if item.job.job_id != job_id], ranked],
+                },
             )
-        record = _APPLICATION_STORE.create_for_job(
-            job_id=job_id,
-            title=str(body.get("title") or "Imported job"),
-            company=str(body.get("company") or "Unknown"),
-            listing_url=str(body.get("listing_url") or url),
-            application_url=str(body.get("application_url") or url),
-            source=str(body.get("source") or "manual"),
-        )
         return record.model_dump(mode="json")
 
     @app.get("/api/watchlists")
@@ -740,7 +745,8 @@ def create_app() -> FastAPI:
         cv_pdf, _, letter_pdf, _ = _render_paths()
         artifacts = {key: path for key, path in (("resume", cv_pdf), ("cover", letter_pdf)) if path is not None}
         return _APPLICATION.fill_safe(
-            approved, artifacts,
+            approved,
+            artifacts,
             application_id=str(body.get("application_id") or ""),
             pack_job_id=str(values.get("selected_job_id") or ""),
         )
