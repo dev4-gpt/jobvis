@@ -145,6 +145,7 @@ export default function TodayPanel({ state }: { state: State }) {
         <option value="base44">JobReach (Base44 JSON or CSV)</option>
         <option value="career-ops">Career-Ops (Markdown or CSV)</option>
         <option value="sheets">Google Sheets (CSV)</option>
+        <option value="muse">Muse (CSV)</option>
       </select></label>
       <label>Paste export <textarea value={content} onChange={(event) => { setContent(event.target.value); setPreview(null); }} /></label>
       <button disabled={busy || !content.trim()} onClick={() => void action(async () => {

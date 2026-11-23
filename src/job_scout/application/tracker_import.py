@@ -21,6 +21,8 @@ _STATUSES: dict[str, ApplicationStatus] = {
     "interested": "saved",
     "applied": "submitted_by_user",
     "submitted": "submitted_by_user",
+    "received - in review": "submitted_by_user",
+    "received / in review": "submitted_by_user",
     "interviewing": "interview",
     "interview scheduled": "interview",
     "offer received": "offer",
@@ -70,6 +72,12 @@ def _date(value: str) -> str | None:
     return (dt if dt.tzinfo else dt.replace(tzinfo=UTC)).astimezone(UTC).isoformat()
 
 
+def _dated_identity(company: str, title: str, submitted: str) -> str:
+    fields = [" ".join(value.casefold().split()) for value in (company, title)]
+    digest = hashlib.sha256(json.dumps([*fields, submitted]).encode()).hexdigest()
+    return f"dated-row:{digest}"
+
+
 def _plan(records: list[ApplicationRecord], source: str, content: str) -> tuple[dict, list[ApplicationRecord]]:
     records = [record.model_copy(deep=True) for record in records]
     rows = _rows(content)
@@ -85,6 +93,12 @@ def _plan(records: list[ApplicationRecord], source: str, content: str) -> tuple[
         url = match[1] if match else url
         listing = row.get("listing_url") or url
         keys = {key for value in (url, listing) if (key := posting_url(value))}
+        submitted_value = row.get("submitted_at") or row.get("applied_at") or row.get("applied_date") or ""
+        submitted = _date(submitted_value)
+        # An exact dated row can be reimported without inventing a posting URL.
+        # Explicit IDs and URLs still distinguish same-title requisitions.
+        if not source_id and not keys and submitted and title and company:
+            source_id = _dated_identity(company, title, submitted)
         if not title or not company or (not keys and not source_id) or (source == "base44" and title in _JOBREACH_EXAMPLES):
             summary["skipped"] += 1
             summary["warnings"].append(f"Row {i}: missing identity or a bundled JobReach example.")
@@ -100,9 +114,8 @@ def _plan(records: list[ApplicationRecord], source: str, content: str) -> tuple[
             continue
         raw_status = row.get("status", "")
         status = _STATUSES.get(raw_status.lower().strip(), "discovered")
-        created = _date(row.get("created_at") or row.get("created_date") or row.get("date") or "") or now_iso()
+        created = _date(row.get("created_at") or row.get("created_date") or row.get("date") or "") or submitted or now_iso()
         updated = _date(row.get("updated_at") or row.get("updated_date") or "") or created
-        submitted = _date(row.get("submitted_at") or row.get("applied_at") or row.get("applied_date") or "")
         notes = row.get("notes", "")
         if matches:
             record = matches[0]
@@ -134,8 +147,11 @@ def _plan(records: list[ApplicationRecord], source: str, content: str) -> tuple[
         if record.status in {"submitted_by_user", "interview", "offer"} and not record.submitted_at:
             record.submitted_at = submitted or (updated if status == "submitted_by_user" else None)
             if record.submitted_at:
-                date = datetime.fromisoformat(record.submitted_at)
-                record.followup_due = [(date + timedelta(days=days)).isoformat() for days in (7, 14)]
+                recorded = datetime.fromisoformat(record.submitted_at)
+                if submitted and re.fullmatch(r"\d{4}-\d{2}-\d{2}", submitted_value):
+                    record.followup_due = [(recorded.date() + timedelta(days=days)).isoformat() for days in (7, 14)]
+                else:
+                    record.followup_due = [(recorded + timedelta(days=days)).isoformat() for days in (7, 14)]
         if record.status == "interview" and not record.interviewed_at:
             record.interviewed_at = _date(row.get("interviewed_at", ""))
         detail = f"{source} · {source_id or url} · {raw_status or 'unspecified'}"
@@ -146,8 +162,8 @@ def _plan(records: list[ApplicationRecord], source: str, content: str) -> tuple[
 
 
 def import_tracker(store: ApplicationStore, source: str, content: str, approval: str | None = None) -> dict:
-    if source not in {"base44", "career-ops", "sheets"}:
-        raise ValueError("Choose Base44, Career-Ops, or Sheets.")
+    if source not in {"base44", "career-ops", "sheets", "muse"}:
+        raise ValueError("Choose Base44, Career-Ops, Google Sheets, or Muse.")
     with store.transaction(strict=True):
         records = store.persisted_records()
         before = [record.model_dump(mode="json") for record in records]

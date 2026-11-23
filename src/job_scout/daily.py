@@ -71,7 +71,8 @@ class DailyShortlist:
             scheduled = record.followup_due if record.status != "interview" else [record.thank_you_due]
             for due in filter(None, scheduled):
                 try:
-                    day = datetime.fromisoformat(due).astimezone(self.tz).date().isoformat()
+                    parsed = datetime.fromisoformat(due)
+                    day = parsed.date().isoformat() if len(due) == 10 else parsed.astimezone(self.tz).date().isoformat()
                 except ValueError:
                     continue
                 if day <= self.date and due not in completed:

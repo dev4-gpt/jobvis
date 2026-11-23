@@ -78,7 +78,9 @@ AIHawk is not launched automatically.
 
 **Unified console.** The Today panel runs saved searches, ranks new postings, and
 shows follow-ups. Preview and import JobReach JSON/CSV, Career-Ops Markdown/CSV,
-or Sheets CSV into the existing tracker. Original records are backed up under
+or Google Sheets and Muse CSV into the existing tracker. Rows without an ID or
+posting URL need an application date to match on company, role, and date within
+their source. Original records are backed up under
 `tracker-backups/` in the Jobvis data directory before a changed import.
 Interview prep lets you reuse STAR stories and save notes per application.
 

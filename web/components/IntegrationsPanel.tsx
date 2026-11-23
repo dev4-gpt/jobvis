@@ -138,7 +138,7 @@ export default function IntegrationsPanel({ state }: { state: State }) {
     <details><summary>Application tracker and follow-ups</summary>
       {applications.map((record) => <article key={record.application_id}>
         <p>{record.company} · {record.title} · {record.status}</p>
-        {record.followup_due?.map((date) => <p key={date}>Follow up: {new Date(date).toLocaleString()}</p>)}
+        {record.followup_due?.map((date) => <p key={date}>Follow up: {date.length === 10 ? date : new Date(date).toLocaleString()}</p>)}
         {record.thank_you_due && <p>Thank you due: {new Date(record.thank_you_due).toLocaleString()}</p>}
         <button disabled={busy} onClick={() => void action(async () => { await request(`/applications/${record.application_id}/status`, "POST", { status: "submitted_by_user" }); })}>Record submission now</button>
         <button disabled={busy} onClick={() => void action(async () => { await request(`/applications/${record.application_id}/status`, "POST", { status: "interview" }); })}>Record interview now</button>

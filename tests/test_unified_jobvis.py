@@ -43,6 +43,33 @@ def test_tracker_import_preview_dedupe_and_backup(tmp_path):
     assert submitted.source_ids == {"sheets": ["one"], "career-ops": ["1"]}
 
 
+def test_muse_export_without_links_or_ids_keeps_status_and_calendar_dates(tmp_path):
+    store = ApplicationStore(tmp_path)
+    content = (
+        "id,company,role,job_url,status,applied_date\n"
+        ',Example Co,"AI Tutor, Design",,Received - In Review,2026-01-17\n'
+        ',Example Co,"AI Tutor, Design",,Received - In Review,2026-01-19\n'
+        ",Example Co,Unknown role,,Received - In Review,\n"
+    )
+    preview = import_tracker(store, "muse", content)
+    assert (preview["created"], preview["skipped"]) == (2, 1)
+    assert store.list() == []
+    import_tracker(store, "muse", content, preview["preview_id"])
+    first, second = store.list()
+    assert first.application_id != second.application_id
+    assert first.status == "submitted_by_user" and first.imported_status == "Received - In Review"
+    assert first.application_url == "" and first.submitted_at == "2026-01-17T00:00:00+00:00"
+    assert first.followup_due == ["2026-01-24", "2026-01-31"]
+    shortlist = daily.DailyShortlist(tmp_path, zone="America/New_York")
+    shortlist.date = "2026-01-23"
+    assert shortlist.followups() == []
+    shortlist.date = "2026-01-24"
+    assert [row["due"] for row in shortlist.followups()] == ["2026-01-24"]
+    preview = import_tracker(store, "muse", content)
+    assert (preview["created"], preview["matched"]) == (0, 2)
+    assert "backup" not in import_tracker(store, "muse", content, preview["preview_id"])
+
+
 def test_daily_pipeline_and_interview_routes(tmp_path, monkeypatch, sample_profile):
     store = ApplicationStore(tmp_path)
     monkeypatch.setattr(api, "_APPLICATION_STORE", store)
