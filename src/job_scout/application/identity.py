@@ -15,7 +15,8 @@ def posting_url(value: str) -> str:
     if port is not None and port != (443 if parsed.scheme == "https" else 80):
         host = parsed.netloc.lower()
     query = sorted(
-        (key, val) for key, val in parse_qsl(parsed.query, keep_blank_values=True)
+        (key, val)
+        for key, val in parse_qsl(parsed.query, keep_blank_values=True)
         if not key.lower().startswith("utm_") and key.lower() not in {"gclid", "fbclid"}
     )
     path = parsed.path.rstrip("/")

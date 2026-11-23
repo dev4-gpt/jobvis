@@ -15,14 +15,23 @@ from job_scout.application.models import ApplicationEvent, ApplicationRecord, Ap
 from job_scout.application.store import ApplicationStore, record_urls, write_private_json
 
 _STATUSES: dict[str, ApplicationStatus] = {
-    "found": "discovered", "new": "discovered", "evaluated": "saved", "interested": "saved",
-    "applied": "submitted_by_user", "submitted": "submitted_by_user", "interviewing": "interview",
-    "interview scheduled": "interview", "offer received": "offer", "not selected": "rejected",
+    "found": "discovered",
+    "new": "discovered",
+    "evaluated": "saved",
+    "interested": "saved",
+    "applied": "submitted_by_user",
+    "submitted": "submitted_by_user",
+    "interviewing": "interview",
+    "interview scheduled": "interview",
+    "offer received": "offer",
+    "not selected": "rejected",
     **{x: x for x in ("discovered", "saved", "tailored", "reviewed", "interview", "offer", "rejected", "withdrawn")},
 }
 _JOBREACH_EXAMPLES = {
-    "AI/ML Research Intern (Summer 2026)", "Machine Learning Intern - Computer Vision",
-    "Data Science Intern - Recommendation Systems", "AI Systems Engineer Intern (Summer 2026)",
+    "AI/ML Research Intern (Summer 2026)",
+    "Machine Learning Intern - Computer Vision",
+    "Data Science Intern - Recommendation Systems",
+    "AI Systems Engineer Intern (Summer 2026)",
     "NLP/LLM Research Intern (Summer 2026)",
 }
 
@@ -43,7 +52,7 @@ def _rows(content: str) -> list[dict]:
         if "#" not in {cell.strip() for cell in row} and "company" not in {cell.strip().lower() for cell in row}:
             continue
         result = []
-        for cells in tables[index + 2:]:
+        for cells in tables[index + 2 :]:
             if len(cells) != len(row) or any(re.fullmatch(r"[: -]+", cell) for cell in cells):
                 break
             result.append(dict(zip(row, cells, strict=True)))
@@ -81,7 +90,8 @@ def _plan(records: list[ApplicationRecord], source: str, content: str) -> tuple[
             summary["warnings"].append(f"Row {i}: missing identity or a bundled JobReach example.")
             continue
         matches = [
-            record for record in records
+            record
+            for record in records
             if (source_id and source_id in record.source_ids.get(source, [])) or keys & record_urls(record)
         ]
         if len(matches) > 1:
@@ -104,8 +114,15 @@ def _plan(records: list[ApplicationRecord], source: str, content: str) -> tuple[
                 record.imported_status = raw_status
         else:
             record = ApplicationRecord(
-                job_id=f"import-{uuid4().hex}", title=title, company=company, source=source, status=status,
-                imported_status=raw_status, notes=notes, created_at=created, updated_at=updated,
+                job_id=f"import-{uuid4().hex}",
+                title=title,
+                company=company,
+                source=source,
+                status=status,
+                imported_status=raw_status,
+                notes=notes,
+                created_at=created,
+                updated_at=updated,
             )
             records.append(record)
             summary["created"] += 1

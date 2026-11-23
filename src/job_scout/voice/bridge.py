@@ -176,6 +176,7 @@ class VoiceBridge:
 
     def start_expansion(self, work) -> str | None:
         """Serialize manual expansion with the existing search/tailor lifecycle."""
+
         def drive(run):
             self._set_status(run, "expanding search with Apify…")
             try:

@@ -75,10 +75,15 @@ class DailyShortlist:
                 except ValueError:
                     continue
                 if day <= self.date and due not in completed:
-                    pending.append({
-                        "application_id": record.application_id, "company": record.company,
-                        "title": record.title, "due": due, "kind": "thank_you" if record.status == "interview" else "followup",
-                    })
+                    pending.append(
+                        {
+                            "application_id": record.application_id,
+                            "company": record.company,
+                            "title": record.title,
+                            "due": due,
+                            "kind": "thank_you" if record.status == "interview" else "followup",
+                        }
+                    )
         return sorted(pending, key=lambda row: row["due"])
 
     def run(self) -> dict:
@@ -93,14 +98,18 @@ class DailyShortlist:
             profile = candidate_store.effective_profile(candidate.profile, candidate.preferences)
             saved = WatchlistStore(self.data_dir).list()
             location = (profile.locations or [""])[0]
-            searches = [item for item in saved if item.enabled] if saved else [
-                Watchlist(name=role, query=role, location=location, remote=profile.remote_ok)
-                for role in ("Machine Learning Engineer", "Applied AI Engineer")
-            ]
+            searches = (
+                [item for item in saved if item.enabled]
+                if saved
+                else [
+                    Watchlist(name=role, query=role, location=location, remote=profile.remote_ok)
+                    for role in ("Machine Learning Engineer", "Applied AI Engineer")
+                ]
+            )
             if not searches:
                 raise ValueError("Enable a saved search before running the shortlist.")
             jobs, diagnostics, searches_run = [], [], []
-            for watch in searches[:settings.scout_max_role_queries]:
+            for watch in searches[: settings.scout_max_role_queries]:
                 result = run_search_detailed(watch.query, watch.location or None, watch.country, watch.remote)
                 searches_run.append(watch.name)
                 jobs.extend(job for job in result.jobs if job.source != "cache")
@@ -109,16 +118,23 @@ class DailyShortlist:
             seen = set().union(*(record_urls(record) for record in tracked))
             seen.update(f"id:{record.source}:{record.job_id}" for record in tracked)
             seen_ids = {record.job_id for record in tracked}
-            postings = [job for job in shortlist_jobs(jobs, seen) if job.job_id not in seen_ids][:settings.scout_max_jobs]
-            ranked = rank_jobs({
-                "profile": profile, "jobs": postings, "source_diagnostics": diagnostics,
-                "candidate_preferences": candidate.candidate_preferences,
-            })
+            postings = [job for job in shortlist_jobs(jobs, seen) if job.job_id not in seen_ids][: settings.scout_max_jobs]
+            ranked = rank_jobs(
+                {
+                    "profile": profile,
+                    "jobs": postings,
+                    "source_diagnostics": diagnostics,
+                    "candidate_preferences": candidate.candidate_preferences,
+                }
+            )
             payload = {
-                "date": self.date, "timezone": self.zone, "searches": searches_run,
+                "date": self.date,
+                "timezone": self.zone,
+                "searches": searches_run,
                 "ranked": [job.model_dump(mode="json") for job in ranked.get("ranked_jobs", [])],
                 "diagnostics": [row.model_dump(mode="json") for row in ranked.get("source_diagnostics", diagnostics)],
-                "warnings": ranked.get("errors", []), "delivery": {"status": "preview"},
+                "warnings": ranked.get("errors", []),
+                "delivery": {"status": "preview"},
             }
             write_private_json(self.path, payload)
             return payload
@@ -137,8 +153,11 @@ class DailyShortlist:
         lines.extend(f"{row['company']} · {row['title']} · {row['kind']}" for row in followups)
         if not followups:
             lines.append("None due.")
-        failures = {f"{row['source']}: {row.get('error') or 'timed out'}" for row in run["diagnostics"]
-                    if row.get("requested") and (row.get("error") or row.get("timed_out"))}
+        failures = {
+            f"{row['source']}: {row.get('error') or 'timed out'}"
+            for row in run["diagnostics"]
+            if row.get("requested") and (row.get("error") or row.get("timed_out"))
+        }
         if failures:
             lines.extend(["", "Source issues", *sorted(failures)])
         return "\n".join(lines)
@@ -164,8 +183,9 @@ class DailyShortlist:
             run["delivery"] = {"status": "unconfirmed"}
             write_private_json(self.path, run)
             try:
-                with smtplib.SMTP_SSL(host, int(os.environ.get("JOBVIS_SMTP_PORT", "465")), timeout=20,
-                                     context=ssl.create_default_context()) as client:
+                with smtplib.SMTP_SSL(
+                    host, int(os.environ.get("JOBVIS_SMTP_PORT", "465")), timeout=20, context=ssl.create_default_context()
+                ) as client:
                     if username := os.environ.get("JOBVIS_SMTP_USERNAME"):
                         client.login(username, os.environ.get("JOBVIS_SMTP_PASSWORD", ""))
                     client.send_message(message, from_addr=sender, to_addrs=[recipient])

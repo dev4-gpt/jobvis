@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-COPY data/cached_jobs.json ./data/cached_jobs.json
+COPY data/cached_jobs.json data/portals.yml ./data/
 
 RUN uv sync --frozen --no-dev
 

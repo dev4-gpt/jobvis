@@ -745,7 +745,8 @@ def create_app() -> FastAPI:
         cv_pdf, _, letter_pdf, _ = _render_paths()
         artifacts = {key: path for key, path in (("resume", cv_pdf), ("cover", letter_pdf)) if path is not None}
         return _APPLICATION.fill_safe(
-            approved, artifacts,
+            approved,
+            artifacts,
             application_id=str(body.get("application_id") or ""),
             pack_job_id=str(values.get("selected_job_id") or ""),
         )

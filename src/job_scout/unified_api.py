@@ -93,8 +93,11 @@ def today() -> dict:
     daily = _daily()
     run = daily.get()
     return {
-        "date": daily.date, "timezone": daily.zone, "run": run,
-        "followups": daily.followups(), "digest": daily.render(run) if run else "",
+        "date": daily.date,
+        "timezone": daily.zone,
+        "run": run,
+        "followups": daily.followups(),
+        "digest": daily.render(run) if run else "",
     }
 
 
@@ -129,8 +132,12 @@ def tailor_today_job(job_id: str) -> dict:
         raise HTTPException(409, "This job is blocked by your search preferences.")
     job = ranked.job
     record = _store().create_for_job(
-        job_id=job.job_id, title=job.title, company=job.company, source=job.source,
-        listing_url=job.listing_url or job.source_url or job.url, application_url=job.application_url or job.url,
+        job_id=job.job_id,
+        title=job.title,
+        company=job.company,
+        source=job.source,
+        listing_url=job.listing_url or job.source_url or job.url,
+        application_url=job.application_url or job.url,
     )
     canonical_id = record.job_id
     job = job.model_copy(update={"job_id": canonical_id})

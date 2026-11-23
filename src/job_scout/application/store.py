@@ -130,8 +130,13 @@ class ApplicationStore:
                     self._upsert(existing)
                 return existing
             record = ApplicationRecord(
-                job_id=job_id, title=title, company=company, listing_url=listing_url,
-                application_url=application_url, source=source, posting_aliases=sorted(known),
+                job_id=job_id,
+                title=title,
+                company=company,
+                listing_url=listing_url,
+                application_url=application_url,
+                source=source,
+                posting_aliases=sorted(known),
             )
             return self._upsert(record)
 
