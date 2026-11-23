@@ -76,6 +76,22 @@ local memory, and reviewed AIHawk export) are described in
 [verification record](docs/integration-acceptance.md). Live services require separate configuration;
 AIHawk is not launched automatically.
 
+**Unified console.** The Today panel runs saved searches, ranks new postings, and
+shows follow-ups. Preview and import JobReach JSON/CSV, Career-Ops Markdown/CSV,
+or Sheets CSV into the existing tracker. Original records are backed up under
+`tracker-backups/` in the Jobvis data directory before a changed import.
+Interview prep lets you reuse STAR stories and save notes per application.
+
+To run a digest preview from a shell or an n8n Execute Command node on the
+Jobvis host, use the checkout as the working directory and run
+`uv run python -m job_scout.daily`. Use the same local data directory as the
+console. The default date boundary is America/New_York, overridable through
+the exported `JOBVIS_DIGEST_TIMEZONE` variable. Schedule one invocation per
+day. For optional self-delivery, export `JOBVIS_SMTP_HOST`, `JOBVIS_SMTP_FROM`,
+and `JOBVIS_DIGEST_EMAIL`, then add `--send`. SMTPS uses port 465 by default
+and supports `JOBVIS_SMTP_PORT`, `JOBVIS_SMTP_USERNAME`, and `JOBVIS_SMTP_PASSWORD`.
+Check the mail provider before retrying an unconfirmed delivery.
+
 Prerequisites: **Python 3.12** (the project pins `>=3.12,<3.13`) and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**. The voice console also needs **Node 20+**.
 
 ```bash

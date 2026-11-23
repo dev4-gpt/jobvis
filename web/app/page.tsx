@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import JobvisOrb from "@/components/JobvisOrb";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
+import TodayPanel from "@/components/TodayPanel";
 import { ActivityPanel, ApplicationPanel, JobsPanel, NextPanel, PackPanel, nextStep } from "@/components/Panels";
 import {
   eventsUrl,
@@ -274,6 +275,7 @@ function Console() {
           <NextPanel step={step} />
         )}
 
+        <TodayPanel state={state} />
         <JobsPanel state={state} onOpenApplication={openJobApplication} />
         <PackPanel state={state} />
         <ApplicationPanel

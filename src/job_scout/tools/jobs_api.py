@@ -28,11 +28,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import urlsplit
 
 import httpx
 from langchain_core.tools import tool
 
+from job_scout.application.identity import posting_url
 from job_scout.config import get_settings
 from job_scout.graph.schemas import JobPosting, SourceDiagnostic
 from job_scout.tools.direct_sources import AshbySource, GreenhouseSource, LeverSource, ProtocolLabsSource, USAJobsSource
@@ -430,11 +430,8 @@ def _dedupe(jobs: list[JobPosting]) -> list[JobPosting]:
     seen: set[str] = set()
     out: list[JobPosting] = []
     for job in jobs:
-        parsed = urlsplit(job.url.strip().lower()) if job.url else None
-        key = (
-            f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
-            if parsed and parsed.path not in {"", "/"}
-            else "|".join((job.title.strip().lower(), job.company.strip().lower(), job.location.strip().lower()))
+        key = posting_url(job.application_url or job.url) or "|".join(
+            (job.title.strip().lower(), job.company.strip().lower(), job.location.strip().lower())
         )
         if key not in seen:
             seen.add(key)
